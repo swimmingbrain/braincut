@@ -1,0 +1,6 @@
+# line endings stay lf no matter which machine commits
+* text=auto eol=lf
+
+
+*.png binary
+*.wasm binary
