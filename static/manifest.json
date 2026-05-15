@@ -1,0 +1,17 @@
+{
+  "name": "brainCUT",
+  "short_name": "brainCUT",
+  "author": "Braian Plaku",
+  "description": "Video editor that runs in your browser. Cut, trim, add transitions and effects, export to MP4 or WebM. No account needed.",
+  "start_url": "/editor",
+  "display": "standalone",
+  "background_color": "#111113",
+  "theme_color": "#111113",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
