@@ -1,0 +1,53 @@
+brainCUT bundles the following libraries. Each keeps its own license; the texts are in
+node_modules/<package>/LICENSE after an install.
+
+mediabunny — demuxing, muxing and the WebCodecs wrappers
+MPL-2.0
+https://github.com/Vanilagy/mediabunny
+
+pixi.js — WebGL compositing
+MIT
+https://github.com/pixijs/pixijs
+
+pixi-filters — the effect filters built on top of it
+MIT
+https://github.com/pixijs/filters
+
+gl-transitions — the GLSL transitions
+MIT
+https://github.com/gl-transitions/gl-transitions
+Each transition names its own author in the header of its GLSL source, and that credit is
+kept in the shader as it is compiled.
+
+immer — immutable drafts and the patches the undo stack is built from
+MIT
+https://github.com/immerjs/immer
+
+idb-keyval — the IndexedDB wrapper projects and recents are stored through
+Apache-2.0
+https://github.com/jakearchibald/idb-keyval
+
+tinykeys — the keyboard shortcut bindings
+MIT
+https://github.com/jamiebuilds/tinykeys
+
+bezier-easing — cubic bezier interpolation for keyframes
+MIT
+https://github.com/gre/bezier-easing
+
+gifenc — GIF encoding and palette quantization
+MIT
+https://github.com/mattdesl/gifenc
+
+@ffmpeg/ffmpeg and @ffmpeg/util — the loader for the converter
+MIT
+https://github.com/ffmpegwasm/ffmpeg.wasm
+
+Not part of this repository:
+
+@ffmpeg/core — the ffmpeg build itself, WebAssembly
+LGPL-2.1-or-later, GPL for some builds
+https://github.com/ffmpegwasm/ffmpeg.wasm
+The core is not shipped with brainCUT and is not committed here. It is downloaded from a
+CDN at runtime, once, and only when a file uses codecs the browser cannot decode on its
+own. The mirror is a preference and can be emptied, which turns conversion off entirely.
