@@ -78,7 +78,8 @@ export function catchUp(
 export function automationTimes(seqStart: number, seqDuration: number, step: number): number[] {
   const times = [seqStart];
   if (step <= 0) return times;
-  for (let t = seqStart + step; t < seqStart + seqDuration - 1e-9; t += step) times.push(t);
+  // multiplied, not accumulated, so the times don't drift along a long piece
+  for (let i = 1; seqStart + i * step < seqStart + seqDuration - 1e-9; i++) times.push(seqStart + i * step);
   return times;
 }
 

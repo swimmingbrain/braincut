@@ -157,9 +157,10 @@ export function scheduleBuffer(
     times.map((t) => (hasTransition ? transitionGainAt(track, clip, t, audioCurve) : 1)),
     ctxTimes
   );
+  // effect params are sampled once per piece, at the moment it starts
   for (const e of chain.effects) {
     try {
-      e.runtime.update(paramsAt(e.effect, seqFrom - clip.start), seqFrom - clip.start);
+      e.runtime.update(paramsAt(e.effect, seqFrom - clip.start), ctxTimes[0]);
     } catch {}
   }
   return source;

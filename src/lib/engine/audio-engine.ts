@@ -67,6 +67,8 @@ export class AudioEngine {
   private scrubbing = false;
   private warned = false;
   private destroyed = false;
+  // the audio graph stays open on the readers it streams from
+  private readonly holds = new Map<Id, () => void>();
 
   constructor(ctx?: AudioContext) {
     this.ctx = ctx ?? new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
@@ -109,13 +111,14 @@ export class AudioEngine {
   }
 
   // the transport clock in sequence seconds. the audio context drives it,
-  // with a wall clock standing in until the context is allowed to run
+  // with a wall clock standing in until the context is allowed to run. the
+  // clock holds still through the start latency, the picture waits for sound
   currentTime(): number {
     if (!this.running) return this.lastTime;
     const elapsed = this.ctx.state === 'running'
       ? this.ctx.currentTime - this.ctxStart
       : (performance.now() - this.perfStart) / 1000;
-    this.lastTime = this.seqStart + elapsed * this.rate;
+    this.lastTime = this.seqStart + Math.max(0, elapsed) * this.rate;
     return this.lastTime;
   }
 
@@ -136,11 +139,23 @@ export class AudioEngine {
     this.rate = rate === 0 ? 1 : rate;
     this.seqStart = fromTime;
     this.lastTime = fromTime;
-    if (this.ctx.state !== 'running') void this.ctx.resume().catch(() => {});
     this.ctxStart = this.ctx.currentTime + START_LATENCY;
     this.perfStart = performance.now() + START_LATENCY * 1000;
     this.running = true;
-    this.session++;
+    this.pruneTracks(sequence);
+    const session = ++this.session;
+    if (this.ctx.state !== 'running') {
+      // the wall clock stands in until the context runs, then the clock is
+      // anchored again so the switch doesn't jump and sound is rescheduled
+      void this.ctx.resume().then(() => {
+        if (session !== this.session || !this.running) return;
+        const now = this.currentTime();
+        this.seqStart = now;
+        this.ctxStart = this.ctx.currentTime + START_LATENCY;
+        this.perfStart = performance.now() + START_LATENCY * 1000;
+        this.restartFrom(now);
+      }, () => {});
+    }
     if (this.timer === null) this.timer = setInterval(() => this.tick(), TICK_MS);
     this.tick();
     this.meterLoop();
@@ -170,16 +185,20 @@ export class AudioEngine {
   }
 
   setRate(rate: number): void {
+    const next = rate === 0 ? 1 : rate;
     if (!this.running) {
-      this.rate = rate === 0 ? 1 : rate;
+      this.rate = next;
       return;
     }
-    this.seek(this.currentTime());
+    const now = this.currentTime();
+    this.rate = next;
+    this.seek(now);
   }
 
   // the sequence changed under a running transport: same clock, new sound
   update(sequence: Sequence): void {
     this.sequence = sequence;
+    this.pruneTracks(sequence);
     if (this.running) this.restartFrom(this.currentTime());
   }
 
@@ -200,6 +219,8 @@ export class AudioEngine {
     stream.done = true;
     if (stream.pieces) void stream.pieces.return(undefined).catch(() => {});
     stream.pieces = null;
+    this.holds.get(stream.clip.id)?.();
+    this.holds.delete(stream.clip.id);
     for (const s of stream.sources) {
       try {
         s.stop();
@@ -220,6 +241,16 @@ export class AudioEngine {
       this.tracks.set(track.id, nodes);
     }
     return nodes;
+  }
+
+  // nodes of tracks that left the sequence would sit on the master forever
+  private pruneTracks(sequence: Sequence): void {
+    const ids = new Set(sequence.tracks.map((t) => t.id));
+    for (const [id, nodes] of this.tracks) {
+      if (ids.has(id)) continue;
+      nodes.gain.disconnect();
+      this.tracks.delete(id);
+    }
   }
 
   private audioTracks(sequence: Sequence): Track[] {
@@ -297,6 +328,9 @@ export class AudioEngine {
           return;
         }
         const window = sourceWindow(stream.clip, stream.scheduledTo, clipEnd(stream.clip), media.duration);
+        if (stream.done) return;
+        this.holds.get(stream.clip.id)?.();
+        this.holds.set(stream.clip.id, cache.hold(media.id));
         stream.pieces = clipAudio(reader, stream.clip, this.ctx, window);
       }
       const clock = { seqToCtx: (t: number) => this.seqToCtx(t), rate: this.rate };
