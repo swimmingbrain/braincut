@@ -174,7 +174,10 @@ export class Compositor {
     const renderer = this.renderer;
     if (!renderer || this.destroyed || this.lost) return;
     if (sequence.width !== this.width || sequence.height !== this.height) {
-      this.setSize(sequence.width, sequence.height, this.scale);
+      // a sequence of another size keeps the canvas at its pixel size and
+      // is scaled into it, which is what an export at a smaller size wants.
+      // the player resizes explicitly before rendering, so it never gets here
+      this.setSize(sequence.width, sequence.height, this.canvas.width / sequence.width);
     }
 
     const cleanups: Array<() => void> = [];
@@ -539,7 +542,9 @@ export class Compositor {
   private emptyTexture(): RenderTexture {
     if (!this.empty) {
       this.empty = this.acquireTarget();
-      this.renderer?.render({ container: new Container(), target: this.empty, clear: true, clearColor: [0, 0, 0, 0] });
+      const nothing = new Container();
+      this.renderer?.render({ container: nothing, target: this.empty, clear: true, clearColor: [0, 0, 0, 0] });
+      nothing.destroy();
     }
     return this.empty;
   }
