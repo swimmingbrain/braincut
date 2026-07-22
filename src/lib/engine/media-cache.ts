@@ -220,6 +220,20 @@ export class MediaCache implements FrameProvider {
     }
   }
 
+  // keeps a reader from being evicted while a long read, an audio stream
+  // for one, is going on. the returned function lets go of it
+  hold(mediaId: string): () => void {
+    const entry = this.readers.get(mediaId);
+    if (!entry) return () => {};
+    entry.busy++;
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      entry.busy--;
+    };
+  }
+
   // warms the decoder for a clip that is about to be needed, e.g. the next
   // clip on the timeline while the current one plays
   prefetch(media: MediaItem, sourceTime: number, lane = ''): void {

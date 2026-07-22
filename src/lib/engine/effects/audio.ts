@@ -50,15 +50,23 @@ function biquad(ctx: BaseAudioContext, type: BiquadFilterType, frequency: number
 }
 
 // a burst of noise fading out exponentially sounds close enough to a room,
-// and costs nothing to make compared to shipping impulse files
+// and costs nothing to make compared to shipping impulse files. the noise
+// is seeded so the preview and every chunk of an export get the same room
 export function makeImpulse(ctx: BaseAudioContext, duration: number, decay: number): AudioBuffer {
   const rate = ctx.sampleRate;
   const length = Math.max(1, Math.floor(rate * duration));
   const buffer = ctx.createBuffer(2, length, rate);
+  let seed = 0x9e3779b9;
+  const random = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
   for (let ch = 0; ch < 2; ch++) {
     const data = buffer.getChannelData(ch);
     for (let i = 0; i < length; i++) {
-      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+      data[i] = (random() * 2 - 1) * Math.pow(1 - i / length, decay);
     }
   }
   return buffer;
