@@ -2,12 +2,7 @@
   import Logo from './Logo.svelte';
   import Icon from './Icon.svelte';
   import { dialog } from '$lib/stores/app';
-
-  export interface RecentProject {
-    id: string;
-    name: string;
-    openedAt: number;
-  }
+  import type { RecentProject } from '$lib/project/persistence';
 
   let {
     recents = [],
@@ -18,6 +13,10 @@
     onopen: (id: string) => void;
     onopenfile: () => void;
   } = $props();
+
+  function sequences(count: number): string {
+    return `${count} ${count === 1 ? 'sequence' : 'sequences'}`;
+  }
 
   function when(time: number): string {
     const days = Math.floor((Date.now() - time) / 86400000);
@@ -56,7 +55,7 @@
           <button class="recent" onclick={() => onopen(recent.id)}>
             <Icon name="film" size={14} />
             <span class="recent-name">{recent.name}</span>
-            <span class="recent-when">{when(recent.openedAt)}</span>
+            <span class="recent-when">{sequences(recent.sequenceCount)} &middot; {when(recent.modifiedAt)}</span>
           </button>
         {/each}
       </div>
