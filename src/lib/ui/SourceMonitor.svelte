@@ -2,11 +2,10 @@
   import { onMount } from 'svelte';
   import { source, type Session } from '$lib/engine/session';
   import { endDrag, startDrag } from '$lib/editor/drag';
-  import { createClipFromMedia } from '$lib/project/defaults';
-  import { placeClips, type Placement } from '$lib/project/ops';
-  import { activeSequence, editSequence, mediaById } from '$lib/project/store';
+  import { insertSource, overwriteSource, sourceRange } from '$lib/editor/source-actions';
+  import { activeSequence, mediaById } from '$lib/project/store';
   import { snapToFrame } from '$lib/project/time';
-  import { addToast, playhead, sourceMedia } from '$lib/stores/app';
+  import { sourceMedia } from '$lib/stores/app';
   import { preferences } from '$lib/stores/preferences';
   import Icon from './Icon.svelte';
   import Monitor from './Monitor.svelte';
@@ -37,44 +36,10 @@
     sourceMedia.update((v) => (v ? { ...v, out: t, in: Math.min(v.in, t) } : v));
   }
 
-  function range(): { in: number; out: number } {
-    const v = $sourceMedia;
-    const inPoint = v?.in ?? 0;
-    const out = v && v.out > inPoint ? v.out : duration;
-    return { in: inPoint, out };
-  }
-
-  // the source range lands on the first unlocked video and audio tracks, the
-  // way a desktop editor does it with its default source patching
-  function place(mode: 'insert' | 'overwrite') {
-    const m = media;
-    const seq = $activeSequence;
-    if (!m || !seq) return;
-    const { in: inPoint, out } = range();
-    const clips = createClipFromMedia(m, $playhead, {
-      in: inPoint,
-      duration: Math.max(1 / seq.fps, out - inPoint),
-      fps: seq.fps,
-      stillDuration: $preferences.stillImageDuration
-    });
-    const video = seq.tracks.find((t) => t.kind === 'video' && !t.locked);
-    const audio = seq.tracks.find((t) => t.kind === 'audio' && !t.locked);
-    const placements: Placement[] = [];
-    if (clips.video && video) placements.push({ trackId: video.id, clip: clips.video });
-    if (clips.audio && audio) placements.push({ trackId: audio.id, clip: clips.audio });
-    if (placements.length === 0) {
-      addToast('No unlocked track to place the clip on', 'warning');
-      return;
-    }
-    editSequence(mode === 'insert' ? 'insert clip' : 'overwrite clip', (draft) => {
-      placeClips(draft, placements, mode);
-    });
-  }
-
   function drag(e: DragEvent, only?: 'video' | 'audio') {
     const m = media;
     if (!m) return;
-    const { in: inPoint, out } = range();
+    const { in: inPoint, out } = sourceRange(m);
     startDrag({ kind: 'source', mediaId: m.id, in: inPoint, out, only }, e);
   }
 </script>
@@ -84,8 +49,8 @@
     <div class="header">
       <span class="title"><span class="name">{media.name}</span> Source</span>
       <div class="controls">
-        <button class="hbtn text" title="Insert at playhead (,)" onclick={() => place('insert')}>Insert</button>
-        <button class="hbtn text" title="Overwrite at playhead (.)" onclick={() => place('overwrite')}>Overwrite</button>
+        <button class="hbtn text" title="Insert at playhead (,)" onclick={() => insertSource()}>Insert</button>
+        <button class="hbtn text" title="Overwrite at playhead (.)" onclick={() => overwriteSource()}>Overwrite</button>
       </div>
     </div>
     <Monitor {session} draggable ondragstart={(e) => drag(e)} ondragend={endDrag} />
