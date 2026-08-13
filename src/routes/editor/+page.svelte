@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import TopBar from '$lib/ui/TopBar.svelte';
   import StatusBar from '$lib/ui/StatusBar.svelte';
   import PanelTabs from '$lib/ui/PanelTabs.svelte';
@@ -7,11 +8,13 @@
   import CommandPalette from '$lib/ui/CommandPalette.svelte';
   import ContextMenu from '$lib/ui/ContextMenu.svelte';
   import Dialogs from '$lib/ui/Dialogs.svelte';
+  import DropOverlay from '$lib/ui/DropOverlay.svelte';
   import Welcome from '$lib/ui/Welcome.svelte';
 
   import SourceMonitor from '$lib/ui/SourceMonitor.svelte';
   import EffectControls from '$lib/ui/EffectControls.svelte';
   import AudioMixer from '$lib/ui/AudioMixer.svelte';
+  import ColorPanel from '$lib/ui/ColorPanel.svelte';
   import ProgramMonitor from '$lib/ui/ProgramMonitor.svelte';
   import ProjectPanel from '$lib/ui/ProjectPanel.svelte';
   import EffectsPanel from '$lib/ui/EffectsPanel.svelte';
@@ -20,11 +23,25 @@
   import Timeline from '$lib/ui/timeline/Timeline.svelte';
 
   import { project } from '$lib/project/store';
+  import type { RecentProject } from '$lib/project/persistence';
+  import { destroySessions, program } from '$lib/engine/session';
+  import { pickFiles } from '$lib/media/import';
+  import { installShortcuts } from '$lib/editor/shortcuts';
+  import { buildCommands } from '$lib/editor/commands';
+  import { exportCurrentFrame } from '$lib/editor/export-actions';
+  import {
+    installProjectLifecycle,
+    openProjectFile,
+    openRecent,
+    recentProjects,
+    saveProject
+  } from '$lib/editor/project-actions';
   import {
     leftPanelTab,
     bottomPanelTab,
     panelSizes,
     dialog,
+    workspace,
     type LeftPanelTab,
     type BottomPanelTab
   } from '$lib/stores/app';
@@ -33,10 +50,14 @@
   const MIN_ROW = 180;
 
   let main = $state<HTMLElement | null>(null);
+  let recents = $state<RecentProject[]>([]);
+
+  const commands = buildCommands();
 
   const topTabs = [
     { id: 'source', label: 'Source' },
     { id: 'effect-controls', label: 'Effect Controls' },
+    { id: 'color', label: 'Color' },
     { id: 'audio-mixer', label: 'Audio Mixer' }
   ];
 
@@ -46,6 +67,14 @@
     { id: 'markers', label: 'Markers' },
     { id: 'history', label: 'History' }
   ];
+
+  // a workspace is just a pair of tabs to start from, any tab stays a click away
+  const workspaceTabs: Record<string, { left: LeftPanelTab; bottom: BottomPanelTab }> = {
+    edit: { left: 'source', bottom: 'project' },
+    color: { left: 'color', bottom: 'project' },
+    effects: { left: 'effect-controls', bottom: 'effects' },
+    audio: { left: 'audio-mixer', bottom: 'project' }
+  };
 
   function resizeLeft(delta: number) {
     const limit = (main?.clientWidth ?? 1200) - 320;
@@ -65,18 +94,52 @@
     }));
   }
 
-  // import, save and open reach into the media and persistence modules; the
-  // shell only decides where their buttons live
-  function noop() {}
+  async function refreshRecents() {
+    recents = await recentProjects();
+  }
+
+  // the welcome screen lists what this browser remembers, fresh every time
+  // it shows
+  $effect(() => {
+    if ($project === null) void refreshRecents();
+  });
+
+  onMount(() => {
+    // the program session mirrors the stores and redraws on every project
+    // change by itself; the source session is built when a clip is opened
+    program();
+    const removeShortcuts = installShortcuts();
+    const removeLifecycle = installProjectLifecycle();
+    const unsubscribeWorkspace = workspace.subscribe((ws) => {
+      const tabs = workspaceTabs[ws];
+      if (!tabs) return;
+      leftPanelTab.set(tabs.left);
+      bottomPanelTab.set(tabs.bottom);
+    });
+    const onExportFrame = () => void exportCurrentFrame();
+    window.addEventListener('braincut:export-frame', onExportFrame);
+
+    return () => {
+      window.removeEventListener('braincut:export-frame', onExportFrame);
+      unsubscribeWorkspace();
+      removeLifecycle();
+      removeShortcuts();
+      destroySessions();
+    };
+  });
 </script>
 
 <svelte:head>
-  <title>brainCUT | Editor</title>
+  <title>{$project ? `brainCUT | ${$project.name}` : 'brainCUT | Editor'}</title>
   <meta name="robots" content="noindex" />
 </svelte:head>
 
 <div class="editor-app">
-  <TopBar onimport={noop} onsave={noop} onopen={noop} onexport={() => dialog.set({ kind: 'export' })} />
+  <TopBar
+    onimport={() => void pickFiles()}
+    onsave={() => void saveProject()}
+    onopen={() => void openProjectFile()}
+    onexport={() => dialog.set({ kind: 'export' })} />
 
   {#if $project}
     <main
@@ -84,7 +147,7 @@
       bind:this={main}
       style="grid-template-columns: {$panelSizes.leftWidth}px 3px 1fr; grid-template-rows: {$panelSizes.topHeight}fr 3px {1 -
         $panelSizes.topHeight}fr">
-      <section class="panel left-top">
+      <section class="panel left-top" data-panel={$leftPanelTab} tabindex="-1">
         <PanelTabs
           tabs={topTabs}
           active={$leftPanelTab}
@@ -94,6 +157,8 @@
             <SourceMonitor />
           {:else if $leftPanelTab === 'effect-controls'}
             <EffectControls />
+          {:else if $leftPanelTab === 'color'}
+            <ColorPanel />
           {:else}
             <AudioMixer />
           {/if}
@@ -104,7 +169,7 @@
         <Resizer on:resize={(e) => resizeLeft(e.detail.delta)} />
       </div>
 
-      <section class="panel program">
+      <section class="panel program" data-panel="program" tabindex="-1">
         <ProgramMonitor />
       </section>
 
@@ -112,7 +177,7 @@
         <Resizer direction="horizontal" on:resize={(e) => resizeTop(e.detail.delta)} />
       </div>
 
-      <section class="panel left-bottom">
+      <section class="panel left-bottom" data-panel={$bottomPanelTab} tabindex="-1">
         <PanelTabs
           tabs={bottomTabs}
           active={$bottomPanelTab}
@@ -134,7 +199,7 @@
         <Resizer on:resize={(e) => resizeLeft(e.detail.delta)} />
       </div>
 
-      <section class="panel timeline-area">
+      <section class="panel timeline-area" data-panel="timeline">
         <ToolStrip />
         <div class="timeline-body">
           <Timeline />
@@ -142,15 +207,16 @@
       </section>
     </main>
   {:else}
-    <Welcome onopen={noop} onopenfile={noop} />
+    <Welcome {recents} onopen={(id) => void openRecent(id)} onopenfile={() => void openProjectFile()} />
   {/if}
 
   <StatusBar />
 </div>
 
-<CommandPalette commands={[]} />
+<CommandPalette {commands} />
 <ContextMenu />
 <Dialogs />
+<DropOverlay />
 
 <style>
   .editor-app {
@@ -175,6 +241,7 @@
     min-height: 0;
     overflow: hidden;
     background: var(--bg-elevated);
+    outline: none;
   }
 
   .panel-body {

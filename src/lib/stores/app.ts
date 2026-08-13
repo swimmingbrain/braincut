@@ -46,7 +46,7 @@ export const snapEnabled = writable(true);
 // what the source monitor is showing, with its own in/out and playhead
 export const sourceMedia = writable<{ mediaId: string; in: number; out: number; time: number } | null>(null);
 
-export type LeftPanelTab = 'source' | 'effect-controls' | 'audio-mixer';
+export type LeftPanelTab = 'source' | 'effect-controls' | 'audio-mixer' | 'color';
 export type BottomPanelTab = 'project' | 'effects' | 'markers' | 'history';
 export const leftPanelTab = writable<LeftPanelTab>('source');
 export const bottomPanelTab = writable<BottomPanelTab>('project');
@@ -65,6 +65,11 @@ export type Dialog =
   | { kind: 'rename'; target: 'project' | 'clip' | 'media' | 'sequence' | 'bin'; id: string };
 
 export const dialog = writable<Dialog | null>(null);
+
+// the file the open project came from or was last saved to, so save can
+// write back without asking again. null for projects that only live in
+// the browser
+export const projectHandle = writable<FileSystemFileHandle | null>(null);
 
 export interface MenuItem {
   label: string;
