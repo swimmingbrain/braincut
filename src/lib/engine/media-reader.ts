@@ -12,6 +12,9 @@ export interface FrameHandle {
   // rotation metadata of the file the picture came from, a proxy may differ
   // from the original when the conversion baked the rotation in
   rotation?: Rotation;
+  // the transfer function the decoder reported: 'pq' and 'hlg' pictures carry
+  // far more range than the canvas shows and need a tone map
+  transfer?: string | null;
   release(): void;
 }
 
@@ -38,6 +41,10 @@ const FRAME_CACHE = 4;
 // a scrub request this far ahead of the last decoded frame keeps pulling from
 // the running iterator instead of seeking, seeking always goes back to a keyframe
 const SCRUB_WINDOW = 1;
+// random access keeps one running iterator per lane. a transition between two
+// cuts of the same file asks for two far apart times every frame, and a single
+// shared iterator would seek back to a keyframe for each of them
+const MAX_SCRUBS = 3;
 // the playback cursor decodes this many frames ahead of the playhead
 const READ_AHEAD = 4;
 // a jump further than this restarts the playback cursor instead of decoding through
@@ -59,15 +66,20 @@ function makeHandle(sample: VideoSample, rotation: Rotation): FrameHandle | null
   let frame: VideoFrame;
   try {
     frame = sample.toVideoFrame();
-  } catch {
-    return null;
+  } catch (e) {
+    throw new Error(`the decoded picture cannot be used: ${e instanceof Error ? e.message : String(e)}`);
   }
+  let transfer: string | null = null;
+  try {
+    transfer = frame.colorSpace?.transfer ?? null;
+  } catch {}
   return {
     image: frame,
     width: sample.squarePixelWidth || sample.codedWidth,
     height: sample.squarePixelHeight || sample.codedHeight,
     timestamp: sample.timestamp,
     rotation,
+    transfer,
     release: () => {
       try {
         frame.close();
@@ -97,6 +109,8 @@ class Cursor implements VideoCursor {
   private newest = -Infinity;
   private readonly chain = new Chain();
   private filling = false;
+  // set when the decoder threw, so a frameAt with nothing to show can say why
+  private failure: unknown = null;
 
   constructor(
     private readonly sink: VideoSampleSink,
@@ -130,6 +144,11 @@ class Cursor implements VideoCursor {
         const covers = sampleEnd(cur, this.fps) > t + tol;
         const nextStartsLater = this.queue.length > 0 && this.queue[0].timestamp > t + tol;
         if (covers || nextStartsLater || this.ended) break;
+      } else if (this.queue.length > 0) {
+        // nothing starts at or before t: the track simply begins later, show
+        // its first picture instead of decoding on in search of one
+        this.current = this.queue.shift()!;
+        break;
       } else if (this.ended) {
         return null;
       }
@@ -137,6 +156,7 @@ class Cursor implements VideoCursor {
       if (!got && this.ended) break;
     }
 
+    if (!this.current && this.failure !== null) throw this.failure;
     this.fill();
     return this.current ? makeHandle(this.current, this.rotation) : null;
   }
@@ -150,6 +170,7 @@ class Cursor implements VideoCursor {
     this.current = null;
     this.ended = false;
     this.newest = -Infinity;
+    this.failure = null;
     this.iter = this.sink.samples(t);
   }
 
@@ -160,8 +181,11 @@ class Cursor implements VideoCursor {
     let result: IteratorResult<VideoSample, void>;
     try {
       result = await iter.next();
-    } catch {
-      if (this.iter === iter) this.ended = true;
+    } catch (e) {
+      if (this.iter === iter) {
+        this.ended = true;
+        this.failure = e;
+      }
       return false;
     }
     if (this.iter !== iter || this.closed) {
@@ -226,7 +250,7 @@ export class MediaReader {
 
   private readonly cache: CachedSample[] = [];
   private tick = 0;
-  private scrub: { iter: AsyncGenerator<VideoSample, void, unknown>; last: number } | null = null;
+  private readonly scrubs = new Map<string, { iter: AsyncGenerator<VideoSample, void, unknown>; last: number; used: number; ended: boolean }>();
   private readonly chain = new Chain();
   private readonly cursors = new Set<Cursor>();
   private closed = false;
@@ -302,31 +326,48 @@ export class MediaReader {
   }
 
   // random access for scrubbing and export. consecutive requests that move
-  // forward a little share one iterator, everything else seeks
-  frameAt(time: number): Promise<FrameHandle | null> {
+  // forward a little share one iterator, everything else seeks. lane keeps
+  // clips that read the same file at different times off each other's iterator
+  frameAt(time: number, lane = ''): Promise<FrameHandle | null> {
     if (this.closed || !this.videoSink) return Promise.resolve(null);
     const t = Math.max(0, Math.min(time, this.duration));
-    return this.chain.run(() => this.randomAccess(t));
+    return this.chain.run(() => this.randomAccess(t, lane));
   }
 
-  private async randomAccess(t: number): Promise<FrameHandle | null> {
+  private async randomAccess(t: number, lane: string): Promise<FrameHandle | null> {
     const hit = this.lookup(t);
     if (hit) return makeHandle(hit, this.rotation);
 
     const sink = this.videoSink!;
-    const reuse = this.scrub !== null && t >= this.scrub.last && t - this.scrub.last < SCRUB_WINDOW;
-    if (!reuse) {
-      this.dropScrub();
-      this.scrub = { iter: sink.samples(t), last: t };
+    let scrub = this.scrubs.get(lane);
+    if (scrub && !(t >= scrub.last && t - scrub.last < SCRUB_WINDOW)) {
+      this.dropScrub(lane);
+      scrub = undefined;
     }
-    const scrub = this.scrub!;
+    if (scrub && scrub.ended) {
+      // the file has no more pictures for this lane, so a clip that reaches
+      // past its media freezes on the last one. handing that one back beats
+      // seeking to the tail of the file again for every frame of the hold
+      const held = this.exact(scrub.last);
+      if (held) return makeHandle(held, this.rotation);
+      this.dropScrub(lane);
+      scrub = undefined;
+    }
+    if (!scrub) {
+      scrub = { iter: sink.samples(t), last: t, used: ++this.tick, ended: false };
+      this.scrubs.set(lane, scrub);
+      this.evictScrubs(lane);
+    }
+    scrub.used = ++this.tick;
     let best: VideoSample | null = null;
+    let failure: unknown = null;
     for (let pulls = 0; pulls < MAX_PULLS; pulls++) {
       let result: IteratorResult<VideoSample, void>;
       try {
         result = await scrub.iter.next();
-      } catch {
-        if (this.scrub === scrub) this.scrub = null;
+      } catch (e) {
+        failure = e;
+        if (this.scrubs.get(lane) === scrub) this.scrubs.delete(lane);
         break;
       }
       if (this.closed) {
@@ -334,7 +375,7 @@ export class MediaReader {
         return null;
       }
       if (result.done) {
-        if (this.scrub === scrub) this.scrub = null;
+        scrub.ended = true;
         break;
       }
       const sample = result.value;
@@ -347,7 +388,8 @@ export class MediaReader {
       best = sample;
       if (sampleEnd(sample, this.fps) > t + 0.5 / this.fps) break;
     }
-    const chosen = best ?? this.lookup(t) ?? this.newestBefore(t);
+    const chosen = best ?? this.lookup(t) ?? this.newestBefore(t) ?? this.earliest();
+    if (!chosen && failure !== null) throw failure;
     return chosen ? makeHandle(chosen, this.rotation) : null;
   }
 
@@ -361,6 +403,27 @@ export class MediaReader {
       }
     }
     return null;
+  }
+
+  // the sample a lane last produced, by its exact timestamp
+  private exact(timestamp: number): VideoSample | null {
+    for (const entry of this.cache) {
+      if (entry.sample.timestamp === timestamp) {
+        entry.used = ++this.tick;
+        return entry.sample;
+      }
+    }
+    return null;
+  }
+
+  // the first picture of the track, for a time before it starts
+  private earliest(): VideoSample | null {
+    let best: CachedSample | null = null;
+    for (const entry of this.cache) {
+      if (!best || entry.sample.timestamp < best.sample.timestamp) best = entry;
+    }
+    if (best) best.used = ++this.tick;
+    return best?.sample ?? null;
   }
 
   private newestBefore(t: number): VideoSample | null {
@@ -391,10 +454,32 @@ export class MediaReader {
     }
   }
 
-  private dropScrub(): void {
-    const scrub = this.scrub;
-    this.scrub = null;
-    if (scrub) void scrub.iter.return().catch(() => {});
+  private dropScrub(lane?: string): void {
+    if (lane === undefined) {
+      for (const key of Array.from(this.scrubs.keys())) this.dropScrub(key);
+      return;
+    }
+    const scrub = this.scrubs.get(lane);
+    if (!scrub) return;
+    this.scrubs.delete(lane);
+    void scrub.iter.return().catch(() => {});
+  }
+
+  // every lane holds a decoder open, so only the ones still being read stay
+  private evictScrubs(keep: string): void {
+    while (this.scrubs.size > MAX_SCRUBS) {
+      let victim: string | null = null;
+      let oldest = Infinity;
+      for (const [lane, s] of this.scrubs) {
+        if (lane === keep) continue;
+        if (s.used < oldest) {
+          oldest = s.used;
+          victim = lane;
+        }
+      }
+      if (victim === null) return;
+      this.dropScrub(victim);
+    }
   }
 
   // sequential decoding for playback, cheap as long as t keeps increasing
