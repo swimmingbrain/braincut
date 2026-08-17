@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { get } from 'svelte/store';
   import Dialog from '../Dialog.svelte';
   import Field from '../Field.svelte';
@@ -11,8 +12,11 @@
 
   let { clipIds, onclose }: { clipIds: string[]; onclose: () => void } = $props();
 
+  // the dialog is keyed on its opening, so the clips it was opened for are
+  // the ones it edits until it closes, whatever the selection does meanwhile
+  const ids = untrack(() => clipIds);
   const seq = get(activeSequence);
-  const clips = clipIds.map((cid) => (seq ? findClipById(seq, cid)?.clip : undefined)).filter((c) => c !== undefined);
+  const clips = ids.map((cid) => (seq ? findClipById(seq, cid)?.clip : undefined)).filter((c) => c !== undefined);
   const first = clips[0] ?? null;
   const fps = seq?.fps ?? 25;
   // the source range stays the same whatever the speed, so it anchors the two fields
@@ -56,7 +60,7 @@
     editSequence('speed / duration', (s) => {
       // a linked pair goes through setClipSpeed once, it handles both sides
       const done = new Set<string>();
-      for (const cid of clipIds) {
+      for (const cid of ids) {
         if (done.has(cid)) continue;
         for (const linked of linkedClips(s, cid)) done.add(linked.id);
         if (setClipSpeed(s, cid, rate, { reverse, rippleDurationChange: ripple, getMedia })) changed++;
