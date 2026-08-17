@@ -31,8 +31,10 @@ export function setDecoderPreference(pref: DecoderPreference): void {
 }
 
 // random access keeps this many decoded frames around, enough for scrubbing
-// back and forth over a cut without touching the decoder
-const FRAME_CACHE = 12;
+// back and forth over a cut without touching the decoder. hardware decoders
+// hand out frames from a small pool and stop producing while too many are
+// held, so this stays well under the pool together with the sink's queue
+const FRAME_CACHE = 4;
 // a scrub request this far ahead of the last decoded frame keeps pulling from
 // the running iterator instead of seeking, seeking always goes back to a keyframe
 const SCRUB_WINDOW = 1;

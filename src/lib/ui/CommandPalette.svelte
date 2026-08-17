@@ -39,6 +39,10 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
+    // the input and the backdrop share this handler, the key must not reach
+    // both or enter runs one command from the filtered list and another from
+    // the full one
+    e.stopPropagation();
     if (e.key === 'Escape') {
       e.preventDefault();
       close();
