@@ -8,6 +8,11 @@ export type FrameMode = 'scrub' | 'play' | 'export';
 // of the same clip doesn't make one decoder jump back and forth
 export interface FrameProvider {
   getFrame(media: MediaItem, sourceTime: number, mode: FrameMode, lane?: string): Promise<FrameHandle | null>;
+  // why a media can't be shown, so the compositor can draw a placeholder
+  // instead of a hole and the ui can say something useful once
+  failure?(mediaId: string): string | undefined;
+  // the picture decoded but the gpu would not take it
+  reportUnusable?(mediaId: string, name: string, reason: string): void;
 }
 
 interface ReaderEntry {
@@ -40,15 +45,45 @@ export class MediaCache implements FrameProvider {
   private readonly readers = new Map<string, ReaderEntry>();
   private readonly opening = new Map<string, Promise<MediaReader | null>>();
   private readonly failed = new Map<string, number>();
+  // media that cannot be decoded here at all, with the reason, kept for the
+  // session so every later frame draws the placeholder without retrying
+  private readonly broken = new Map<string, string>();
+  private readonly onFailure?: (mediaId: string, reason: string) => void;
   private readonly cursors = new Map<string, CursorEntry>();
   private readonly images = new Map<string, ImageEntry>();
   private readonly imageLoads = new Map<string, Promise<ImageBitmap | null>>();
   private tick = 0;
   private disposed = false;
 
-  constructor(opts: { maxReaders?: number; getBlob: (media: MediaItem) => Promise<Blob | null> }) {
+  constructor(opts: {
+    maxReaders?: number;
+    getBlob: (media: MediaItem) => Promise<Blob | null>;
+    onFailure?: (mediaId: string, reason: string) => void;
+  }) {
     this.maxReaders = Math.max(1, opts.maxReaders ?? 8);
     this.getBlob = opts.getBlob;
+    this.onFailure = opts.onFailure;
+  }
+
+  failure(mediaId: string): string | undefined {
+    return this.broken.get(mediaId);
+  }
+
+  // a relink, a conversion or an explicit reset gives the file another go
+  clearFailure(mediaId?: string): void {
+    if (mediaId === undefined) this.broken.clear();
+    else this.broken.delete(mediaId);
+  }
+
+  private markBroken(media: MediaItem, e: unknown): void {
+    this.reportUnusable(media.id, media.name, e instanceof Error ? e.message : String(e));
+  }
+
+  reportUnusable(mediaId: string, name: string, reason: string): void {
+    if (this.broken.has(mediaId)) return;
+    this.broken.set(mediaId, reason);
+    console.warn(`[braincut] ${name} cannot be shown here: ${reason}`);
+    this.onFailure?.(mediaId, reason);
   }
 
   async reader(media: MediaItem): Promise<MediaReader | null> {
@@ -65,9 +100,13 @@ export class MediaCache implements FrameProvider {
     if (failedAt !== undefined && performance.now() - failedAt < FAILURE_COOLDOWN) return null;
 
     const open = (async () => {
+      // a file that is simply not there yet is retried after the cooldown,
+      // one whose bytes are there but won't decode is remembered
+      let haveBlob = false;
       try {
         const blob = await this.getBlob(media);
         if (!blob) throw new Error(`No file for ${media.name}`);
+        haveBlob = true;
         const reader = await MediaReader.open(media, blob);
         if (this.disposed) {
           reader.close();
@@ -78,8 +117,9 @@ export class MediaCache implements FrameProvider {
         this.evictReaders();
         return reader;
       } catch (e) {
-        console.warn(`[braincut] could not open ${media.name}:`, e);
         this.failed.set(media.id, performance.now());
+        if (haveBlob) this.markBroken(media, e);
+        else console.warn(`[braincut] could not open ${media.name}:`, e);
         return null;
       } finally {
         this.opening.delete(media.id);
@@ -132,9 +172,11 @@ export class MediaCache implements FrameProvider {
     if (failedAt !== undefined && performance.now() - failedAt < FAILURE_COOLDOWN) return null;
 
     const load = (async () => {
+      let haveBlob = false;
       try {
         const blob = await this.getBlob(media);
         if (!blob) throw new Error(`No file for ${media.name}`);
+        haveBlob = true;
         const bitmap = await createImageBitmap(blob);
         if (this.disposed) {
           bitmap.close();
@@ -145,8 +187,9 @@ export class MediaCache implements FrameProvider {
         this.evictImages();
         return bitmap;
       } catch (e) {
-        console.warn(`[braincut] could not decode ${media.name}:`, e);
         this.failed.set(media.id, performance.now());
+        if (haveBlob) this.markBroken(media, e);
+        else console.warn(`[braincut] could not decode ${media.name}:`, e);
         return null;
       } finally {
         this.imageLoads.delete(media.id);
@@ -180,6 +223,16 @@ export class MediaCache implements FrameProvider {
 
   async getFrame(media: MediaItem, sourceTime: number, mode: FrameMode, lane = ''): Promise<FrameHandle | null> {
     if (this.disposed) return null;
+    if (this.broken.has(media.id)) return null;
+    try {
+      return await this.decodeFrame(media, sourceTime, mode, lane);
+    } catch (e) {
+      this.markBroken(media, e);
+      return null;
+    }
+  }
+
+  private async decodeFrame(media: MediaItem, sourceTime: number, mode: FrameMode, lane: string): Promise<FrameHandle | null> {
     if (media.kind === 'image') {
       const bitmap = await this.image(media);
       if (!bitmap) return null;
@@ -204,7 +257,7 @@ export class MediaCache implements FrameProvider {
         this.sweepCursors();
         return await c.cursor.frameAt(sourceTime);
       }
-      return await reader.frameAt(sourceTime);
+      return await reader.frameAt(sourceTime, lane);
     } finally {
       if (entry) entry.busy--;
     }
@@ -249,6 +302,7 @@ export class MediaCache implements FrameProvider {
       for (const e of this.images.values()) e.bitmap.close();
       this.images.clear();
       this.failed.clear();
+      this.broken.clear();
       return;
     }
     this.closeReader(mediaId);
@@ -258,6 +312,7 @@ export class MediaCache implements FrameProvider {
       this.images.delete(mediaId);
     }
     this.failed.delete(mediaId);
+    this.broken.delete(mediaId);
   }
 
   stats(): { readers: number; cursors: number; images: number; imageBytes: number; frames: number } {

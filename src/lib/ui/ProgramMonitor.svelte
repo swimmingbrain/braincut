@@ -1,13 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { program, type Session } from '$lib/engine/session';
+  import { program, resetPreview, sessionEpoch, type Session } from '$lib/engine/session';
   import { computeSpriteTransform, readTransform } from '$lib/engine/transform';
   import { isAnimated, paramsAt, setKeyframe } from '$lib/project/keyframes';
   import { addMarker, clipAt, findClipById, setInOut, sequenceDuration } from '$lib/project/ops';
   import { createMarker } from '$lib/project/defaults';
   import { activeSequence, commitPreview, editSequence, mediaById, preview, selectClips } from '$lib/project/store';
   import type { Clip, ParamValue, Project } from '$lib/project/types';
-  import { playhead, previewQuality, selection, showSafeMargins } from '$lib/stores/app';
+  import { addToast, playhead, previewQuality, selection, showSafeMargins } from '$lib/stores/app';
+  import { preferences } from '$lib/stores/preferences';
+  import { openFrameExportMenu } from '$lib/editor/export-actions';
   import Icon from './Icon.svelte';
   import Monitor from './Monitor.svelte';
   import Transport from './Transport.svelte';
@@ -15,27 +17,50 @@
   let session = $state<Session | null>(null);
   let zoom = $state<'fit' | number>('fit');
   let recentDrops = $state(0);
+  let problem = $state<string | null>(null);
+
+  const scales = [1, 0.5, 0.25, 0.125];
 
   onMount(() => {
-    const s = program();
-    session = s;
-    s.player.setQuality($previewQuality);
-    // dropped frames are only worth a word while they are happening
-    let seen = 0;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const unsub = s.player.stats.subscribe((stats) => {
-      if (stats.dropped > seen) {
-        recentDrops = stats.dropped - seen;
+    // the saved preference is what the monitor should open at
+    const saved = $preferences.previewQuality;
+    if (scales.includes(saved)) previewQuality.set(saved as 1 | 0.5 | 0.25 | 0.125);
+
+    let detach = () => {};
+    // a reset throws the session away, this picks up the one that replaced it
+    const off = sessionEpoch.subscribe(() => {
+      detach();
+      const s = program();
+      session = s;
+      s.player.setQuality($previewQuality);
+      // dropped frames are only worth a word while they are happening
+      let seen = 0;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const stats = s.player.stats.subscribe((value) => {
+        if (value.dropped > seen) {
+          recentDrops = value.dropped - seen;
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(() => (recentDrops = 0), 1000);
+        }
+        seen = value.dropped;
+      });
+      const problems = s.player.problem.subscribe((value) => (problem = value));
+      detach = () => {
+        stats();
+        problems();
         if (timer) clearTimeout(timer);
-        timer = setTimeout(() => (recentDrops = 0), 1000);
-      }
-      seen = stats.dropped;
+      };
     });
     return () => {
-      unsub();
-      if (timer) clearTimeout(timer);
+      off();
+      detach();
     };
   });
+
+  function reset() {
+    resetPreview();
+    addToast('Preview reset', 'info');
+  }
 
   const zoomOptions = [
     { value: 'fit', label: 'Fit' },
@@ -47,11 +72,12 @@
   const qualityOptions = [
     { value: '1', label: 'Full' },
     { value: '0.5', label: '1/2' },
-    { value: '0.25', label: '1/4' }
+    { value: '0.25', label: '1/4' },
+    { value: '0.125', label: '1/8' }
   ];
 
   function setQuality(v: string) {
-    const q = Number(v) as 1 | 0.5 | 0.25;
+    const q = Number(v) as 1 | 0.5 | 0.25 | 0.125;
     previewQuality.set(q);
     session?.player.setQuality(q);
   }
@@ -70,8 +96,9 @@
     editSequence('add marker', (seq) => addMarker(seq, createMarker($playhead)));
   }
 
-  function exportFrame() {
-    window.dispatchEvent(new CustomEvent('braincut:export-frame'));
+  // the button offers both formats, the shortcut stays on png
+  function exportFrame(event: MouseEvent) {
+    openFrameExportMenu(event);
   }
 
   // the topmost visual clip under the playhead, what a double click picks
@@ -258,6 +285,14 @@
         onclick={() => showSafeMargins.update((v) => !v)}>
         <Icon name="fit" size={14} />
       </button>
+      <button
+        class="hbtn"
+        class:alert={problem !== null}
+        title={problem ? `Reset preview — ${problem}` : 'Reset preview'}
+        aria-label="Reset preview"
+        onclick={reset}>
+        <Icon name="loop" size={14} />
+      </button>
       <button class="hbtn" title="Export frame (Ctrl+Shift+E)" aria-label="Export frame" onclick={exportFrame}>
         <Icon name="camera" size={14} />
       </button>
@@ -306,6 +341,13 @@
         {/if}
         {#if recentDrops > 0}
           <span class="drops">dropped {recentDrops}</span>
+        {/if}
+        {#if problem}
+          <div class="stuck">
+            <span class="what">The preview stopped drawing.</span>
+            <span class="why">{problem}</span>
+            <button class="action-btn" onclick={reset}>Reset preview</button>
+          </div>
         {/if}
       {/snippet}
     </Monitor>
@@ -412,6 +454,10 @@
     background: var(--accent-dim);
   }
 
+  .hbtn.alert {
+    color: var(--error);
+  }
+
   .empty {
     flex: 1;
     display: flex;
@@ -465,6 +511,50 @@
   .pivot {
     fill: var(--accent);
     pointer-events: none;
+  }
+
+  .stuck {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 16px;
+    text-align: center;
+    background: rgba(17, 17, 19, 0.82);
+  }
+
+  .stuck .what {
+    font-size: 12.5px;
+    color: var(--text-primary);
+  }
+
+  .stuck .why {
+    font-family: var(--font-editor);
+    font-size: 11px;
+    color: var(--text-muted);
+    max-width: 90%;
+    overflow-wrap: anywhere;
+  }
+
+  .stuck .action-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+  }
+
+  .stuck .action-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+    border-color: var(--accent);
   }
 
   .drops {

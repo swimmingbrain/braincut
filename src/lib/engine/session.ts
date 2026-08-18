@@ -1,10 +1,10 @@
 import { browser } from '$app/environment';
-import { get } from 'svelte/store';
+import { get, writable } from 'svelte/store';
 import { getBlobForMedia } from '$lib/media/sources';
 import { createClipFromMedia, createSequence } from '$lib/project/defaults';
 import { activeSequence, mediaById } from '$lib/project/store';
 import type { Id, MediaItem, Sequence } from '$lib/project/types';
-import { loopPlayback, playhead, playing, previewQuality, renderStatus, showSafeMargins, sourceMedia } from '$lib/stores/app';
+import { addToast, loopPlayback, playhead, playing, previewQuality, renderStatus, showSafeMargins, sourceMedia } from '$lib/stores/app';
 import { preferences } from '$lib/stores/preferences';
 import { AudioEngine } from './audio-engine';
 import { Compositor } from './compositor';
@@ -37,6 +37,10 @@ let sourceSession: Session | null = null;
 // instead of a derived store read
 let mediaMap = new Map<Id, MediaItem>();
 
+// bumped by a reset so the monitors let go of the old session and ask for
+// the new one
+export const sessionEpoch = writable(0);
+
 function getMedia(id: Id): MediaItem | undefined {
   return mediaMap.get(id);
 }
@@ -65,7 +69,13 @@ function forgetMedia(id: Id): void {
 function sharedCache(): MediaCache {
   if (cache) return cache;
   const created = new MediaCache({
-    getBlob: (media) => getBlobForMedia(media, { preferProxy: get(preferences).useProxies })
+    getBlob: (media) => getBlobForMedia(media, { preferProxy: get(preferences).useProxies }),
+    onFailure: (mediaId) => {
+      const name = mediaMap.get(mediaId)?.name ?? 'a file';
+      addToast(`${name} can't be decoded here — convert it or relink it`, 'error', 6000);
+      programSession?.player.invalidate();
+      sourceSession?.player.invalidate();
+    }
   });
   cache = created;
 
@@ -114,10 +124,12 @@ export function program(): Session {
   if (programSession) return programSession;
   const shared = sharedCache();
   let current = get(activeSequence);
+  let recovered = () => {};
   const compositor = new Compositor({
     width: current?.width ?? 1920,
     height: current?.height ?? 1080,
-    scale: get(previewQuality)
+    scale: get(previewQuality),
+    onRecovered: () => recovered()
   });
   const audio = new AudioEngine();
   let isPlaying = false;
@@ -140,6 +152,8 @@ export function program(): Session {
       renderStatus.update((s) => (p ? (s === 'idle' ? 'playing' : s) : s === 'playing' ? 'idle' : s));
     }
   });
+
+  recovered = () => player.invalidate();
 
   let sequenceId = current?.id ?? null;
   const subs: Unsubscribe[] = [
@@ -205,7 +219,8 @@ export function source(): Session {
   requireBrowser();
   if (sourceSession) return sourceSession;
   const shared = sharedCache();
-  const compositor = new Compositor({ width: 1280, height: 720, scale: get(previewQuality) });
+  let recovered = () => {};
+  const compositor = new Compositor({ width: 1280, height: 720, scale: get(previewQuality), onRecovered: () => recovered() });
   const audio = new AudioEngine();
   let current: Sequence | null = null;
   const player = new Player({
@@ -216,6 +231,8 @@ export function source(): Session {
     getMedia,
     audioScrubbing: () => get(preferences).audioScrubbing
   });
+
+  recovered = () => player.invalidate();
 
   // the base sequence is rebuilt only when the file or its rate changes,
   // in/out are laid over it so clip ids stay put and the caches stay warm
@@ -281,16 +298,25 @@ export function source(): Session {
   return session;
 }
 
-export function destroySessions(): void {
+// the escape hatch behind 'Reset preview': everything the picture depends on
+// is thrown away and built again, failures included, so a file that broke
+// once gets another try
+export function resetPreview(): void {
+  if (!browser) return;
+  destroySessions({ keepMedia: true });
+  sessionEpoch.update((n) => n + 1);
+}
+
+export function destroySessions(opts?: { keepMedia?: boolean }): void {
   programSession?.destroy();
   sourceSession?.destroy();
   for (const off of cacheSubs) off();
   cacheSubs = [];
   cache?.dispose();
   cache = null;
-  mediaMap = new Map();
+  if (!opts?.keepMedia) mediaMap = new Map();
 }
 
 if (import.meta.hot) {
-  import.meta.hot.dispose(destroySessions);
+  import.meta.hot.dispose(() => destroySessions());
 }
