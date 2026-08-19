@@ -1,5 +1,6 @@
 import { writable } from 'svelte/store';
 import { browser } from '$app/environment';
+import { defaultAudioTransition, defaultTransitionDuration, defaultVideoTransition } from '$lib/engine/transitions/defaults';
 
 export interface Preferences {
   // seconds a still gets when it lands on the timeline
@@ -25,10 +26,10 @@ export interface Preferences {
 
 const defaults: Preferences = {
   stillImageDuration: 5,
-  defaultTransitionDuration: 1,
-  defaultVideoTransition: 'fade',
-  defaultAudioTransition: 'crossfade',
-  previewQuality: 0.5,
+  defaultTransitionDuration,
+  defaultVideoTransition,
+  defaultAudioTransition,
+  previewQuality: 0.25,
   autoSave: true,
   snapping: true,
   ffmpegMirror: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm',
