@@ -13,7 +13,7 @@
   import { addToast, contextMenu, dialog, dragPayload, importProgress, leftPanelTab, playhead, sourceMedia, type MenuItem } from '$lib/stores/app';
   import { preferences } from '$lib/stores/preferences';
   import { pickFiles, pickFolder } from '$lib/media/import';
-  import { forgetSource, getBlob } from '$lib/media/sources';
+  import { forgetSource, getBlobForMedia, grantAccess, needsPermission, relinkMissing } from '$lib/media/sources';
   import { createProxy, proxyStatus, removeProxy } from '$lib/media/proxy';
   import { convertForEditing, ffmpegAvailable } from '$lib/media/transcode';
   import { endDrag, readDrag, startDrag } from '$lib/editor/drag';
@@ -174,8 +174,17 @@
     });
   }
 
+  const missing = $derived(media.filter((m) => m.status === 'missing'));
+
+  // one click for every handle the browser wants permission for again
+  async function grant() {
+    const { granted, total } = await grantAccess();
+    if (granted === total) addToast(`Access granted, ${granted} file${granted === 1 ? '' : 's'} back`, 'success');
+    else addToast(`${granted} of ${total} files granted, relink the rest`, 'warning', 5000);
+  }
+
   async function makeProxy(item: MediaItem) {
-    const blob = await getBlob(item.id);
+    const blob = await getBlobForMedia(item);
     if (!blob) {
       addToast('The file is not available, relink it first', 'warning');
       return;
@@ -193,7 +202,7 @@
       addToast('Converting is turned off. Set a mirror for the converter in the preferences to enable it.', 'warning', 6000);
       return;
     }
-    const blob = await getBlob(item.id);
+    const blob = await getBlobForMedia(item);
     if (!blob) {
       addToast('The file is not available, relink it first', 'warning');
       return;
@@ -264,6 +273,7 @@
         ? [{ label: 'Convert for editing', action: () => convert(item), disabled: many || busy || !ffmpegAvailable() }]
         : []),
       { label: 'Relink…', action: () => dialog.set({ kind: 'relink', mediaId: item.id }), disabled: many },
+      ...(missing.length > 1 ? [{ label: 'Relink all…', action: () => void relinkMissing() }] : []),
       { separator: true, label: '' },
       { label: many ? `Remove ${ids.length} items` : 'Remove', danger: true, action: () => removeMedia(ids) }
     ];
@@ -510,6 +520,11 @@
     <button class="tool-btn" onclick={() => pickFolder()} title="Import a folder" aria-label="Import a folder">
       <Icon name="folder" size={14} />
     </button>
+    {#if missing.length > 0}
+      <button class="tool-btn warn" onclick={() => void relinkMissing()} title="Find the missing files again" aria-label="Relink all">
+        <Icon name="link" size={14} />
+      </button>
+    {/if}
     <Menu items={addMenu}>
       {#snippet trigger({ open, toggle })}
         <button class="tool-btn" class:active={open} onclick={toggle} title="New title, color matte, adjustment layer, sequence or bin" aria-label="New">
@@ -519,6 +534,17 @@
       {/snippet}
     </Menu>
   </div>
+
+  {#if missing.length > 0}
+    <div class="missing-bar">
+      <Icon name="warning" size={12} />
+      <span class="missing-text">{missing.length} file{missing.length === 1 ? '' : 's'} missing</span>
+      {#if $needsPermission.size > 0}
+        <button class="missing-btn" onclick={grant}>Grant access</button>
+      {/if}
+      <button class="missing-btn" onclick={() => void relinkMissing()}>Relink all…</button>
+    </div>
+  {/if}
 
   {#if view === 'list' && media.length > 0}
     <div class="columns">
@@ -774,6 +800,45 @@
   .tool-btn.active {
     background: var(--accent-dim);
     color: var(--accent);
+  }
+
+  .tool-btn.warn {
+    color: var(--error);
+  }
+
+  .missing-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    color: var(--error);
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .missing-text {
+    flex: 1;
+    min-width: 0;
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .missing-btn {
+    padding: 2px 8px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .missing-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
   }
 
   .glyph-list,
