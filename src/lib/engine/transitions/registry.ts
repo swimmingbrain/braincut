@@ -6,6 +6,7 @@ import type { ParamValue, Transition } from '$lib/project/types';
 import { id as newId } from '$lib/project/ids';
 import type { ParamDef } from '../effects/registry';
 import type { GlParamType } from './glsl';
+import { defaultAudioTransition, defaultVideoTransition } from './defaults';
 
 export interface TransitionDef {
   id: string;
@@ -20,9 +21,7 @@ export interface TransitionDef {
 
 export const transitionGroups = ['Dissolve', 'Wipe', 'Slide & Push', '3D & Motion', 'Zoom', 'Stylize', 'Audio'];
 
-export const defaultTransitionDuration = 1;
-export const defaultVideoTransition = 'cross-dissolve';
-export const defaultAudioTransition = 'crossfade';
+export { defaultAudioTransition, defaultTransitionDuration, defaultVideoTransition } from './defaults';
 
 interface Curated {
   id: string;

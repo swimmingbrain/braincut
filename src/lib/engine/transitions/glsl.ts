@@ -5,7 +5,11 @@
 // pixi keeps texture y pointing down while gl-transitions were written for
 // y up, so the uv handed to the transition and the lookups both flip. this
 // keeps "wipe up" going up
-export const transitionHeader = `precision highp float;
+// the version line matters: without it pixi treats the source as glsl es 1.00
+// and defines `in` to `varying`, which breaks every transition that takes an
+// `in` qualified function parameter
+export const transitionHeader = `#version 300 es
+precision highp float;
 in vec2 vTextureCoord;
 out vec4 finalColor;
 uniform sampler2D uFromTexture;
@@ -36,6 +40,29 @@ const patches: Record<string, (glsl: string) => string> = {
   FilmBurn: (glsl) => glsl.replace(/\btexture\s*\(/g, 'burnTexture(')
 };
 
+// glsl es 1.00 let a global be initialised from a uniform, 3.00 wants a
+// constant there. the few transitions that do it get the expression moved
+// into a function and the name defined to a call, so their bodies read the same
+const GLOBAL_INIT = /^\s*(float|int|uint|bool|vec2|vec3|vec4|ivec2|ivec3|ivec4|bvec2|bvec3|bvec4|mat2|mat3|mat4)\s+([A-Za-z_]\w*)\s*=\s*(.+);\s*$/;
+const DECLARATION = /^\s*(?:const|uniform|in|out|attribute|varying)\b/;
+
+export function liftGlobalInitializers(glsl: string): string {
+  const lines = glsl.split('\n');
+  let depth = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (depth === 0 && !DECLARATION.test(line)) {
+      const m = GLOBAL_INIT.exec(line);
+      if (m) lines[i] = `${m[1]} ${m[2]}_lifted() { return ${m[3]}; }\n#define ${m[2]} ${m[2]}_lifted()`;
+    }
+    for (const ch of line) {
+      if (ch === '{') depth++;
+      else if (ch === '}') depth--;
+    }
+  }
+  return lines.join('\n');
+}
+
 export function rewriteTransitionGlsl(glslId: string, glsl: string): string {
   let out = patches[glslId] ? patches[glslId](glsl) : glsl;
   // the header sets the precision, a second statement mid-file is an error
@@ -43,6 +70,7 @@ export function rewriteTransitionGlsl(glslId: string, glsl: string): string {
   // line comments go too, a few keep old gl_FragColor lines around
   out = out.replace(/\/\/.*$/gm, '');
   out = out.replace(/\btexture2D\s*\(/g, 'texture(');
+  out = liftGlobalInitializers(out);
   return out;
 }
 

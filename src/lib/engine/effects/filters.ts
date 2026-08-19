@@ -20,12 +20,17 @@ import { MirrorFilter } from './shaders/mirror';
 import { PosterizeFilter } from './shaders/posterize';
 import { VignetteFilter } from './shaders/vignette';
 import { setVec } from './shaders/common';
+import { filterCompiles } from './shader-check';
 
 export interface EffectContext {
   width: number;
   height: number;
   time: number;
   fps: number;
+  // screen pixels per media pixel: pixi renders a filter at the size the layer
+  // covers, so a length the user typed has to be converted or a blur would
+  // grow every time the preview quality drops
+  scale: number;
 }
 
 export interface VideoEffectRuntime {
@@ -39,6 +44,10 @@ type Params = Record<string, ParamValue>;
 function num(p: Params, key: string, fallback = 0): number {
   const v = p[key];
   return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+}
+// a length the user gave in media pixels, in the pixels the filter works in
+function px(p: Params, key: string, fallback: number, ctx: EffectContext): number {
+  return num(p, key, fallback) * ctx.scale;
 }
 function bool(p: Params, key: string, fallback = false): boolean {
   const v = p[key];
@@ -72,7 +81,7 @@ function colorRgb(p: Params, key: string, fallback = 0): [number, number, number
 // point params are offsets from the frame centre, the shaders want pixels from the corner
 function centre(p: Params, key: string, ctx: EffectContext): { x: number; y: number } {
   const [x, y] = point(p, key);
-  return { x: ctx.width / 2 + x, y: ctx.height / 2 + y };
+  return { x: (ctx.width / 2 + x) * ctx.scale, y: (ctx.height / 2 + y) * ctx.scale };
 }
 // a deterministic per-frame seed so scrubbing back gives the same grain
 function frameSeed(ctx: EffectContext): number {
@@ -98,14 +107,14 @@ function runtime<F extends Filter>(filter: F, update: (f: F, p: Params, ctx: Eff
 const blurQuality: Record<string, number> = { low: 2, medium: 4, high: 8 };
 
 const factories: Record<string, () => VideoEffectRuntime> = {
-  'gaussian-blur': () => runtime(new BlurFilter({ strength: 10, quality: 4 }), (f, p) => {
-    f.strength = num(p, 'strength', 10);
+  'gaussian-blur': () => runtime(new BlurFilter({ strength: 10, quality: 4 }), (f, p, ctx) => {
+    f.strength = px(p, 'strength', 10, ctx);
     f.quality = blurQuality[str(p, 'quality', 'medium')] ?? 4;
   }),
 
-  'directional-blur': () => runtime(new MotionBlurFilter(), (f, p) => {
+  'directional-blur': () => runtime(new MotionBlurFilter(), (f, p, ctx) => {
     const a = rad(num(p, 'angle'));
-    const d = num(p, 'distance', 20);
+    const d = px(p, 'distance', 20, ctx);
     f.velocity = { x: Math.cos(a) * d, y: Math.sin(a) * d };
     f.kernelSize = Math.min(25, Math.max(5, Math.round(d / 4) * 2 + 1));
   }),
@@ -113,7 +122,7 @@ const factories: Record<string, () => VideoEffectRuntime> = {
   'radial-blur': () => runtime(new RadialBlurFilter(), (f, p, ctx) => {
     f.angle = num(p, 'angle', 15);
     f.center = centre(p, 'center', ctx);
-    const r = num(p, 'radius');
+    const r = px(p, 'radius', 0, ctx);
     f.radius = r > 0 ? r : -1;
     f.kernelSize = Math.max(3, Math.round(num(p, 'quality', 9)) | 1);
   }),
@@ -121,22 +130,23 @@ const factories: Record<string, () => VideoEffectRuntime> = {
   'zoom-blur': () => runtime(new ZoomBlurFilter(), (f, p, ctx) => {
     f.strength = num(p, 'strength', 10) / 100;
     f.center = centre(p, 'center', ctx);
-    f.innerRadius = num(p, 'innerRadius');
+    f.innerRadius = px(p, 'innerRadius', 0, ctx);
     f.radius = -1;
   }),
 
   sharpen: () => runtime(new ConvolutionFilter(), (f, p, ctx) => {
     const k = num(p, 'amount', 30) / 100;
     f.matrix = [0, -k, 0, -k, 1 + 4 * k, -k, 0, -k, 0];
-    f.width = ctx.width;
-    f.height = ctx.height;
+    f.width = ctx.width * ctx.scale;
+    f.height = ctx.height * ctx.scale;
   }),
 
   'tilt-shift': () => runtime(new TiltShiftFilter(), (f, p, ctx) => {
-    f.blur = num(p, 'blur', 20);
-    f.gradientBlur = num(p, 'gradient', 300);
-    f.start = { x: 0, y: (ctx.height * num(p, 'start', 50)) / 100 };
-    f.end = { x: ctx.width, y: (ctx.height * num(p, 'end', 50)) / 100 };
+    f.blur = px(p, 'blur', 20, ctx);
+    f.gradientBlur = px(p, 'gradient', 300, ctx);
+    const h = ctx.height * ctx.scale;
+    f.start = { x: 0, y: (h * num(p, 'start', 50)) / 100 };
+    f.end = { x: ctx.width * ctx.scale, y: (h * num(p, 'end', 50)) / 100 };
   }),
 
   'color-correction': () => runtime(new ColorCorrectionFilter(), (f, p) => {
@@ -242,8 +252,8 @@ const factories: Record<string, () => VideoEffectRuntime> = {
     f.uniforms.uLevels = Math.max(2, Math.round(num(p, 'levels', 6)));
   }),
 
-  pixelate: () => runtime(new PixelateFilter(), (f, p) => {
-    f.size = Math.max(1, num(p, 'size', 10));
+  pixelate: () => runtime(new PixelateFilter(), (f, p, ctx) => {
+    f.size = Math.max(1, px(p, 'size', 10, ctx));
   }),
 
   noise: () => runtime(new NoiseFilter(), (f, p, ctx) => {
@@ -257,9 +267,9 @@ const factories: Record<string, () => VideoEffectRuntime> = {
     return runtime(f, (f, p, ctx) => {
       const slices = Math.max(2, Math.round(num(p, 'slices', 6)));
       if (f.slices !== slices) f.slices = slices;
-      f.offset = num(p, 'offset', 60);
+      f.offset = px(p, 'offset', 60, ctx);
       f.direction = num(p, 'direction');
-      const shift = num(p, 'colorShift', 20) / 100 * 10;
+      const shift = ((num(p, 'colorShift', 20) / 100) * 10) * ctx.scale;
       f.red = { x: shift, y: 0 };
       f.green = { x: -shift, y: 0 };
       f.blue = { x: 0, y: shift };
@@ -273,10 +283,11 @@ const factories: Record<string, () => VideoEffectRuntime> = {
     });
   },
 
-  'rgb-split': () => runtime(new RGBSplitFilter(), (f, p) => {
-    f.red = point(p, 'red');
-    f.green = point(p, 'green');
-    f.blue = point(p, 'blue');
+  'rgb-split': () => runtime(new RGBSplitFilter(), (f, p, ctx) => {
+    const shift = ([x, y]: [number, number]) => ({ x: x * ctx.scale, y: y * ctx.scale });
+    f.red = shift(point(p, 'red'));
+    f.green = shift(point(p, 'green'));
+    f.blue = shift(point(p, 'blue'));
   }),
 
   emboss: () => runtime(new EmbossFilter(), (f, p) => {
@@ -312,64 +323,64 @@ const factories: Record<string, () => VideoEffectRuntime> = {
     f.seed = frameSeed(ctx);
   }),
 
-  glow: () => runtime(new GlowFilter(), (f, p) => {
-    f.distance = num(p, 'distance', 10);
+  glow: () => runtime(new GlowFilter(), (f, p, ctx) => {
+    f.distance = px(p, 'distance', 10, ctx);
     f.outerStrength = num(p, 'outerStrength', 4);
     f.innerStrength = num(p, 'innerStrength');
     f.color = colorNum(p, 'color', 0xffffff);
   }),
 
-  bloom: () => runtime(new AdvancedBloomFilter(), (f, p) => {
+  bloom: () => runtime(new AdvancedBloomFilter(), (f, p, ctx) => {
     f.threshold = num(p, 'threshold', 50) / 100;
     f.bloomScale = num(p, 'intensity', 1);
     f.brightness = num(p, 'brightness', 1);
-    f.blur = num(p, 'blur', 8);
+    f.blur = px(p, 'blur', 8, ctx);
   }),
 
-  'drop-shadow': () => runtime(new DropShadowFilter(), (f, p) => {
+  'drop-shadow': () => runtime(new DropShadowFilter(), (f, p, ctx) => {
     const [x, y] = point(p, 'offset');
-    f.offset = { x, y };
-    f.blur = num(p, 'blur', 4);
+    f.offset = { x: x * ctx.scale, y: y * ctx.scale };
+    f.blur = px(p, 'blur', 4, ctx);
     f.color = colorNum(p, 'color', 0);
     f.alpha = num(p, 'opacity', 60) / 100;
   }),
 
-  outline: () => runtime(new OutlineFilter(), (f, p) => {
-    f.thickness = num(p, 'thickness', 2);
+  outline: () => runtime(new OutlineFilter(), (f, p, ctx) => {
+    f.thickness = px(p, 'thickness', 2, ctx);
     f.color = colorNum(p, 'color', 0xffffff);
     f.alpha = num(p, 'opacity', 100) / 100;
   }),
 
-  ascii: () => runtime(new AsciiFilter(), (f, p) => {
-    f.size = Math.max(2, num(p, 'size', 8));
+  ascii: () => runtime(new AsciiFilter(), (f, p, ctx) => {
+    f.size = Math.max(2, px(p, 'size', 8, ctx));
     f.color = colorNum(p, 'color', 0xffffff);
     f.replaceColor = bool(p, 'replaceColor');
   }),
 
-  mosaic: () => runtime(new PixelateFilter(), (f, p) => {
-    f.size = [Math.max(1, num(p, 'width', 16)), Math.max(1, num(p, 'height', 16))];
+  mosaic: () => runtime(new PixelateFilter(), (f, p, ctx) => {
+    f.size = [Math.max(1, px(p, 'width', 16, ctx)), Math.max(1, px(p, 'height', 16, ctx))];
   }),
 
   twist: () => runtime(new TwistFilter(), (f, p, ctx) => {
     f.angle = rad(num(p, 'angle', 90));
-    f.radius = num(p, 'radius', 300);
+    f.radius = px(p, 'radius', 300, ctx);
     f.offset = centre(p, 'center', ctx);
   }),
 
   'bulge-pinch': () => runtime(new BulgePinchFilter(), (f, p, ctx) => {
     const [x, y] = point(p, 'center');
     f.center = { x: 0.5 + x / ctx.width, y: 0.5 + y / ctx.height };
-    f.radius = num(p, 'radius', 300);
+    f.radius = px(p, 'radius', 300, ctx);
     f.strength = num(p, 'strength', 50) / 100;
   }),
 
   shockwave: () => runtime(new ShockwaveFilter(), (f, p, ctx) => {
     f.center = centre(p, 'center', ctx);
-    f.speed = num(p, 'speed', 500);
-    f.amplitude = num(p, 'amplitude', 30);
-    f.wavelength = num(p, 'wavelength', 160);
+    f.speed = px(p, 'speed', 500, ctx);
+    f.amplitude = px(p, 'amplitude', 30, ctx);
+    f.wavelength = px(p, 'wavelength', 160, ctx);
     f.brightness = num(p, 'brightness', 1);
-    const r = num(p, 'radius');
+    const r = px(p, 'radius', 0, ctx);
     f.radius = r > 0 ? r : -1;
     f.time = Math.max(0, ctx.time - num(p, 'startTime'));
   }),
@@ -377,8 +388,8 @@ const factories: Record<string, () => VideoEffectRuntime> = {
   reflection: () => runtime(new ReflectionFilter(), (f, p, ctx) => {
     f.mirror = bool(p, 'mirror', true);
     f.boundary = num(p, 'boundary', 50) / 100;
-    const amp = num(p, 'amplitude', 20);
-    const wl = num(p, 'wavelength', 60);
+    const amp = px(p, 'amplitude', 20, ctx);
+    const wl = px(p, 'wavelength', 60, ctx);
     const alpha = num(p, 'opacity', 70) / 100;
     f.amplitude = [amp, amp * 0.5];
     f.waveLength = [wl, wl * 2];
@@ -388,7 +399,7 @@ const factories: Record<string, () => VideoEffectRuntime> = {
 
   'lens-distortion': () => runtime(new BulgePinchFilter(), (f, p, ctx) => {
     f.center = { x: 0.5, y: 0.5 };
-    f.radius = Math.hypot(ctx.width, ctx.height) / 2;
+    f.radius = (Math.hypot(ctx.width, ctx.height) / 2) * ctx.scale;
     f.strength = num(p, 'amount', 20) / 100;
   }),
 
@@ -429,7 +440,15 @@ const factories: Record<string, () => VideoEffectRuntime> = {
 // and masks the layer itself, so they have no runtime here
 export function createVideoEffect(type: string): VideoEffectRuntime | null {
   const factory = factories[type];
-  return factory ? factory() : null;
+  if (!factory) return null;
+  const made = factory();
+  // a shader that will not build here would paint black, no effect at all is
+  // the better answer
+  if (!filterCompiles(made.filter, `effect ${type}`)) {
+    made.destroy();
+    return null;
+  }
+  return made;
 }
 
 export function hasVideoEffectRuntime(type: string): boolean {

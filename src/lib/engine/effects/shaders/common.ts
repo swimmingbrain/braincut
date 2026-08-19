@@ -3,7 +3,8 @@ import { Filter, GlProgram, defaultFilterVert } from 'pixi.js';
 // what every custom fragment starts with. pixi hands the filter its input as
 // uTexture and describes the frame through these vec4s (size, 1/size for
 // uInputSize; x, y, w, h for uOutputFrame; the sample clamp for uInputClamp)
-export const fragmentHeader = `precision highp float;
+export const fragmentHeader = `#version 300 es
+precision highp float;
 in vec2 vTextureCoord;
 out vec4 finalColor;
 uniform sampler2D uTexture;

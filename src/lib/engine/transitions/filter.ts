@@ -5,6 +5,7 @@ import { Filter, GlProgram, Texture, defaultFilterVert } from 'pixi.js';
 import type { UniformData } from 'pixi.js';
 import type { ParamValue } from '$lib/project/types';
 import { hexToRgb } from '../effects/filters';
+import { filterCompiles } from '../effects/shader-check';
 import { buildTransitionFragment, uniformTypeFor } from './glsl';
 import type { GlParamType } from './glsl';
 import { glTransition, transitionDef } from './registry';
@@ -75,6 +76,16 @@ export class TransitionFilter extends Filter {
     this.resources.uToSampler = to.source.style;
   }
 
+  // the compositor's render targets die on a resize, and a source still bound
+  // to this shader would be destroyed under it
+  clearInputs(): void {
+    const empty = Texture.EMPTY.source;
+    this.resources.uFromTexture = empty;
+    this.resources.uFromSampler = empty.style;
+    this.resources.uToTexture = empty;
+    this.resources.uToSampler = empty.style;
+  }
+
   set progress(v: number) {
     this.uniforms.progress = Math.min(1, Math.max(0, v));
   }
@@ -127,9 +138,22 @@ export class TransitionFilter extends Filter {
   }
 }
 
+// what a transition whose shader will not build here turns into
+const FALLBACK = 'cross-dissolve';
+
 // always a fresh instance, the compositor keeps one per transition in use
 export function createTransitionFilter(id: string): TransitionFilter | null {
   const def = transitionDef(id);
   if (!def || def.kind !== 'video') return null;
-  return new TransitionFilter(def);
+  let filter: TransitionFilter | null = null;
+  try {
+    filter = new TransitionFilter(def);
+  } catch (e) {
+    console.warn(`[braincut] transition ${def.id} could not be built:`, e);
+  }
+  if (filter) {
+    if (filterCompiles(filter, `transition ${def.id}`)) return filter;
+    filter.destroy();
+  }
+  return id === FALLBACK ? null : createTransitionFilter(FALLBACK);
 }
