@@ -289,6 +289,10 @@ function media(raw: unknown, path: string): MediaItem {
     addedAt: num(raw, 'addedAt', path, 0)
   };
   if (typeof raw.statusReason === 'string') m.statusReason = raw.statusReason;
+  // identity of the file on disk, only written since these fields exist
+  if (typeof raw.fileName === 'string') m.fileName = raw.fileName;
+  if (typeof raw.lastModified === 'number' && Number.isFinite(raw.lastModified)) m.lastModified = raw.lastModified;
+  if (typeof raw.relativePath === 'string') m.relativePath = raw.relativePath;
   return m;
 }
 
