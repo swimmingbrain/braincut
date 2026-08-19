@@ -1,16 +1,17 @@
 <script lang="ts">
   import Dialog from '../Dialog.svelte';
   import Icon from '../Icon.svelte';
-  import { mediaById } from '$lib/project/store';
+  import { mediaById, project } from '$lib/project/store';
   import { formatDuration } from '$lib/project/time';
   import { formatBytes } from '$lib/media/opfs';
-  import { relinkMedia, sourceName } from '$lib/media/sources';
+  import { relinkMedia, relinkMissing, sourceName } from '$lib/media/sources';
   import { addToast } from '$lib/stores/app';
 
   let { mediaId, onclose }: { mediaId: string; onclose: () => void } = $props();
 
   const media = $derived($mediaById.get(mediaId) ?? null);
-  const fileName = $derived(sourceName(mediaId) ?? media?.name ?? '');
+  const fileName = $derived(sourceName(mediaId) || media?.fileName || media?.name || '');
+  const missing = $derived(($project?.media ?? []).filter((m) => m.status === 'missing').length);
   let busy = $state(false);
   let error = $state<string | null>(null);
   let input = $state<HTMLInputElement | null>(null);
@@ -75,6 +76,7 @@
       </dl>
       <p class="help">
         Pick the same file, or a different one: the duration, size and frame rate are read again and every clip using it follows along.
+        {#if missing > 1}Relink all picks one folder and matches every missing file in it by name and size.{/if}
       </p>
       {#if error}
         <p class="error">{error}</p>
@@ -86,6 +88,9 @@
   {/if}
   {#snippet footer()}
     <button class="dialog-btn" onclick={onclose}>Cancel</button>
+    {#if missing > 1}
+      <button class="dialog-btn" onclick={() => { onclose(); void relinkMissing(); }}>Relink all…</button>
+    {/if}
     <button class="dialog-btn primary" onclick={pick} disabled={!media || busy}>{busy ? 'Reading…' : 'Pick file…'}</button>
   {/snippet}
 </Dialog>
