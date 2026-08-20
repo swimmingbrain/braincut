@@ -22,22 +22,27 @@ export function isMediaFile(name: string, type = ''): boolean {
   return i !== -1 && MEDIA_EXTENSIONS.includes(name.slice(i + 1).toLowerCase());
 }
 
-interface Entry {
+export interface ImportEntry {
   file: File;
   handle: FileSystemFileHandle | null;
+  // where the file sat inside the folder it came from, when we know
+  path: string | null;
 }
+
+type Entry = ImportEntry;
+export type ImportInput = File[] | FileSystemFileHandle[] | ImportEntry[] | DataTransfer;
 
 const PROBE_CONCURRENCY = 2;
 
-async function walkHandle(handle: FileSystemFileHandle | FileSystemDirectoryHandle, out: Entry[]) {
+async function walkHandle(handle: FileSystemFileHandle | FileSystemDirectoryHandle, out: Entry[], prefix = '') {
   if (handle.kind === 'file') {
     const file = await handle.getFile();
-    if (isMediaFile(file.name, file.type)) out.push({ file, handle });
+    if (isMediaFile(file.name, file.type)) out.push({ file, handle, path: prefix ? `${prefix}/${handle.name}` : null });
     return;
   }
   for await (const child of handle.values()) {
     if (child.name.startsWith('.')) continue;
-    await walkHandle(child, out);
+    await walkHandle(child, out, prefix ? `${prefix}/${handle.name}` : handle.name);
   }
 }
 
@@ -52,7 +57,8 @@ function entryFile(entry: FileSystemFileEntry): Promise<File> {
 async function walkEntry(entry: FileSystemEntry, out: Entry[]) {
   if (entry.isFile) {
     const file = await entryFile(entry as FileSystemFileEntry);
-    if (isMediaFile(file.name, file.type)) out.push({ file, handle: null });
+    const path = entry.fullPath ? entry.fullPath.replace(/^\//, '') : null;
+    if (isMediaFile(file.name, file.type)) out.push({ file, handle: null, path: path === file.name ? null : path });
     return;
   }
   if (!entry.isDirectory) return;
@@ -78,32 +84,36 @@ function collectDrop(transfer: DataTransfer): Promise<Entry[]> {
     for (const item of items) {
       if (item.kind !== 'file') continue;
       if (item.getAsFileSystemHandle) {
-        work.push(item.getAsFileSystemHandle().then((handle) => (handle ? walkHandle(handle, out) : undefined)).catch(() => {}));
+        work.push(item.getAsFileSystemHandle().then((handle) => (handle ? walkHandle(handle as FileSystemFileHandle | FileSystemDirectoryHandle, out) : undefined)).catch(() => {}));
       } else {
         const entry = item.webkitGetAsEntry?.();
         if (entry) work.push(walkEntry(entry, out).catch(() => {}));
         else {
           const file = item.getAsFile();
-          if (file && isMediaFile(file.name, file.type)) out.push({ file, handle: null });
+          if (file && isMediaFile(file.name, file.type)) out.push({ file, handle: null, path: null });
         }
       }
     }
   } else {
     for (const file of Array.from(transfer.files)) {
-      if (isMediaFile(file.name, file.type)) out.push({ file, handle: null });
+      if (isMediaFile(file.name, file.type)) out.push({ file, handle: null, path: null });
     }
   }
   return Promise.all(work).then(() => out);
 }
 
-async function collect(input: File[] | FileSystemFileHandle[] | DataTransfer): Promise<Entry[]> {
+async function collect(input: ImportInput): Promise<Entry[]> {
   if (input instanceof DataTransfer) return collectDrop(input);
   const out: Entry[] = [];
   for (const item of input) {
     if (item instanceof File) {
-      if (isMediaFile(item.name, item.type)) out.push({ file: item, handle: null });
+      const path = (item as File & { webkitRelativePath?: string }).webkitRelativePath || null;
+      if (isMediaFile(item.name, item.type)) out.push({ file: item, handle: null, path });
+    } else if ('kind' in item) {
+      // FileSystemHandle is not a global everywhere, the kind tells them apart
+      await walkHandle(item as FileSystemFileHandle | FileSystemDirectoryHandle, out);
     } else {
-      await walkHandle(item, out);
+      out.push(item);
     }
   }
   return out;
@@ -122,7 +132,11 @@ async function buildItem(entry: Entry, binId: string | null): Promise<MediaItem>
     }))),
     id: mediaId, binId, label: 'none', addedAt: Date.now(), thumbnail: null
   };
-  registerSource(mediaId, entry.handle ? { file: entry.file, handle: entry.handle } : { file: entry.file });
+  // what it takes to find the same file again after the project is reopened
+  base.fileName = entry.file.name;
+  base.lastModified = entry.file.lastModified;
+  if (entry.path) base.relativePath = entry.path;
+  registerSource(mediaId, { file: entry.file, handle: entry.handle ?? undefined, relativePath: entry.path });
   if (base.status === 'ready') {
     base.thumbnail = await posterThumbnail(entry.file, base, { width: 160 }).catch(() => null);
   }
@@ -140,7 +154,7 @@ function summarize(items: MediaItem[]) {
 }
 
 export async function importFiles(
-  input: File[] | FileSystemFileHandle[] | DataTransfer,
+  input: ImportInput,
   opts: { binId?: string | null } = {}
 ): Promise<MediaItem[]> {
   if (!get(project)) {
@@ -228,7 +242,7 @@ export async function pickFolder(opts: { binId?: string | null } = {}): Promise<
       const dir = await window.showDirectoryPicker({ mode: 'read', id: 'braincut-media' });
       const entries: Entry[] = [];
       await walkHandle(dir, entries);
-      return importFiles(entries.map((e) => e.handle!), opts);
+      return importFiles(entries, opts);
     }
     return importFiles(await inputFallback({ directory: true }), opts);
   } catch (e) {

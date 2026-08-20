@@ -88,6 +88,28 @@ describe('serialize', () => {
     expect(effect.keyframes.amount).toEqual([{ time: 0, value: 'x', easing: 'linear' }, { time: 1, value: 3, easing: 'linear' }]);
   });
 
+  it('carries the identity of the file a media item came from', () => {
+    const raw = {
+      sequences: [{ name: 's', width: 1920, height: 1080, fps: 25, tracks: [] }],
+      media: [
+        { id: 'm1', name: 'Interview', kind: 'video', fileName: 'a001.mp4', fileSize: 1234, lastModified: 1700000000000, relativePath: 'day one/a001.mp4', status: 'ready' },
+        { id: 'm2', name: 'old.mp4', kind: 'video', fileSize: 99, status: 'ready' }
+      ]
+    };
+    const p = parseProject(JSON.stringify(raw));
+    expect(p.media[0].fileName).toBe('a001.mp4');
+    expect(p.media[0].lastModified).toBe(1700000000000);
+    expect(p.media[0].relativePath).toBe('day one/a001.mp4');
+    // a file written before these existed still loads, just without them
+    expect(p.media[1].fileName).toBeUndefined();
+    expect(p.media[1].lastModified).toBeUndefined();
+    // and they survive a round trip through the file
+    const again = parseProject(serializeProject(p));
+    expect(again.media[0].fileName).toBe('a001.mp4');
+    expect(again.media[0].lastModified).toBe(1700000000000);
+    expect(again.media[0].relativePath).toBe('day one/a001.mp4');
+  });
+
   it('throws readable errors on garbage', () => {
     expect(() => parseProject('not json')).toThrow(/valid JSON/);
     expect(() => parseProject('[]')).toThrow(/an object/);

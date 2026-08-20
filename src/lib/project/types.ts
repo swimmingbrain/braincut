@@ -52,6 +52,13 @@ export interface MediaItem {
   container: string | null;
   mimeType: string;
   fileSize: number;
+  // what the file was called on disk and when it was last written there, so a
+  // project opened later can recognise the same file again. old project files
+  // have neither, matching falls back to the item name and the size
+  fileName?: string;
+  lastModified?: number;
+  // path inside the folder it was imported from, when the browser gave one
+  relativePath?: string;
   rotation: Rotation;
   alpha: boolean;
   status: MediaStatus;
