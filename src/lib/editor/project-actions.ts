@@ -4,6 +4,7 @@ import { PROJECT_EXTENSION, parseProject, projectFileName, serializeProject } fr
 import {
   cancelAutosave,
   flushAutosave,
+  isStoredLocally,
   listRecents,
   loadProjectLocal,
   scheduleAutosave,
@@ -97,6 +98,12 @@ async function open(p: Project, handle: FileSystemFileHandle | null): Promise<vo
   addToast(`Opened ${p.name}`, 'success', 2000);
 }
 
+// a project file dropped on the window lands here
+export async function openProjectFromFile(file: File): Promise<void> {
+  if (!confirmDiscard()) return;
+  await openFromFile(file, null);
+}
+
 async function openFromFile(file: File, handle: FileSystemFileHandle | null): Promise<void> {
   let p: Project;
   try {
@@ -127,8 +134,17 @@ function inputFallback(): Promise<File | null> {
   });
 }
 
+// work is only really lost when the browser has no copy of it either.
+// with autosave on, a stored project comes back from the recents list, so
+// asking about it is noise
+export function unsavedWork(): boolean {
+  const p = get(project);
+  if (!p || !get(dirty)) return false;
+  return !(get(preferences).autoSave && isStoredLocally(p.id));
+}
+
 export function confirmDiscard(): boolean {
-  if (!get(project) || !get(dirty)) return true;
+  if (!unsavedWork()) return true;
   return confirm('The open project has unsaved changes. Continue without saving them?');
 }
 
@@ -201,12 +217,13 @@ export function installProjectLifecycle(): () => void {
     if (p && get(preferences).autoSave) scheduleAutosave(p);
   });
 
+  // an import, a conversion or an export running is never a reason to hold
+  // the tab: only changes that would be gone for good are
   function onBeforeUnload(e: BeforeUnloadEvent) {
     void flushAutosave();
-    if (get(dirty)) {
-      e.preventDefault();
-      e.returnValue = '';
-    }
+    if (!unsavedWork()) return;
+    e.preventDefault();
+    e.returnValue = '';
   }
   window.addEventListener('beforeunload', onBeforeUnload);
 
