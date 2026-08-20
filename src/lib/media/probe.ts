@@ -27,6 +27,38 @@ export function codecName(codec: string | null): string {
   return codec;
 }
 
+// isConfigSupported answers from a table of what the platform claims it can
+// do. a decoder that configures is the platform actually saying yes, and it
+// costs nothing as long as no chunk goes through it, so a file only lands as
+// unsupported when the real decoder refused it
+async function configures(config: VideoDecoderConfig | AudioDecoderConfig, kind: 'video' | 'audio'): Promise<boolean> {
+  const available = kind === 'video' ? typeof VideoDecoder !== 'undefined' : typeof AudioDecoder !== 'undefined';
+  if (!available) return true;
+  let decoder: VideoDecoder | AudioDecoder;
+  let failed = false;
+  try {
+    if (kind === 'video') {
+      const d = new VideoDecoder({ output: (frame) => frame.close(), error: () => { failed = true; } });
+      d.configure(config as VideoDecoderConfig);
+      decoder = d;
+    } else {
+      const d = new AudioDecoder({ output: (sample) => sample.close(), error: () => { failed = true; } });
+      d.configure(config as AudioDecoderConfig);
+      decoder = d;
+    }
+  } catch {
+    return false;
+  }
+  // a config the decoder cannot really take comes back through the error
+  // callback, one task later, not as a throw
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const ok = !failed && decoder.state === 'configured';
+  try {
+    decoder.close();
+  } catch {}
+  return ok;
+}
+
 function extension(name: string): string {
   const i = name.lastIndexOf('.');
   return i === -1 ? '' : name.slice(i + 1).toLowerCase();
@@ -147,11 +179,15 @@ async function readVideo(track: InputVideoTrack, result: ProbeResult, reasons: s
   } catch {
     result.fps = null;
   }
-  const decodable = codec !== null && (await track.canDecode().catch(() => false));
+  let decodable = codec !== null && (await track.canDecode().catch(() => false));
+  if (decodable) {
+    const config = await track.getDecoderConfig().catch(() => null);
+    if (config) decodable = await configures(config, 'video');
+  }
   result.hasVideo = decodable;
   if (!decodable) {
     reasons.push(codec
-      ? `${codecName(codec)} video can't be decoded by this browser`
+      ? `${codecName(codec)} video can't be decoded by this browser, convert it to H.264 to use it here`
       : 'The video codec isn\'t recognised');
   }
 }
@@ -161,11 +197,15 @@ async function readAudio(track: InputAudioTrack, result: ProbeResult, reasons: s
   result.audioCodec = codec;
   result.channels = await track.getNumberOfChannels();
   result.sampleRate = await track.getSampleRate();
-  const decodable = codec !== null && (await track.canDecode().catch(() => false));
+  let decodable = codec !== null && (await track.canDecode().catch(() => false));
+  if (decodable) {
+    const config = await track.getDecoderConfig().catch(() => null);
+    if (config) decodable = await configures(config, 'audio');
+  }
   result.hasAudio = decodable;
   if (!decodable) {
     reasons.push(codec
-      ? `${codecName(codec)} audio can't be decoded by this browser`
+      ? `${codecName(codec)} audio can't be decoded by this browser, convert the file to use its sound`
       : 'The audio codec isn\'t recognised');
   }
 }
