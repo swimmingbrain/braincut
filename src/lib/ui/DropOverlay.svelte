@@ -1,6 +1,8 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
   import { importFiles } from '$lib/media/import';
+  import { openProjectFromFile } from '$lib/editor/project-actions';
+  import { PROJECT_EXTENSION } from '$lib/project/serialize';
   import { DRAG_MIME } from '$lib/editor/drag';
 
   // enter/leave fire for every child the pointer crosses, a counter is the
@@ -14,8 +16,11 @@
     return Array.from(types).includes('Files') && !Array.from(types).includes(DRAG_MIME);
   }
 
-  function inTimeline(target: EventTarget | null): boolean {
-    return target instanceof Element && target.closest('.timeline-area') !== null;
+  function projectFile(transfer: DataTransfer): File | null {
+    for (const file of Array.from(transfer.files ?? [])) {
+      if (file.name.toLowerCase().endsWith(PROJECT_EXTENSION)) return file;
+    }
+    return null;
   }
 
   function ondragenter(e: DragEvent) {
@@ -24,6 +29,9 @@
     visible = true;
   }
 
+  // every dragover over the window has to be answered, everywhere: the one
+  // spot that forgets lets the browser open the dropped file and leave the
+  // editor behind, unsaved
   function ondragover(e: DragEvent) {
     if (!hasFiles(e)) return;
     e.preventDefault();
@@ -40,10 +48,14 @@
     depth = 0;
     visible = false;
     if (!hasFiles(e) || !e.dataTransfer) return;
-    // the timeline places dropped files as clips itself
-    if (inTimeline(e.target)) return;
     e.preventDefault();
-    importFiles(e.dataTransfer);
+    const project = projectFile(e.dataTransfer);
+    if (project) {
+      void openProjectFromFile(project);
+      return;
+    }
+    // the timeline turns a drop of its own into clips, it never takes files
+    void importFiles(e.dataTransfer);
   }
 </script>
 
