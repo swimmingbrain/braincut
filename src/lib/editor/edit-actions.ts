@@ -186,7 +186,7 @@ export function toggleLoop(): void {
   loopPlayback.update((on) => !on);
 }
 
-export function setPreviewQuality(q: 1 | 0.5 | 0.25): void {
+export function setPreviewQuality(q: 1 | 0.5 | 0.25 | 0.125): void {
   previewQuality.set(q);
 }
 

@@ -132,6 +132,11 @@ export function installShortcuts(target: Window | HTMLElement = window): () => v
     'Shift+Backspace': outsideTimeline(() => timelineActions.rippleDeleteSelection()),
     KeyQ: bind(() => rippleTrimToPlayhead('previous')),
     KeyW: bind(() => rippleTrimToPlayhead('next')),
+    // alt turns the frame steps into a nudge of the selected clips
+    'Alt+ArrowLeft': bind(() => timelineActions.nudgeSelection(-1)),
+    'Alt+ArrowRight': bind(() => timelineActions.nudgeSelection(1)),
+    'Alt+Shift+ArrowLeft': bind(() => timelineActions.nudgeSelection(-5)),
+    'Alt+Shift+ArrowRight': bind(() => timelineActions.nudgeSelection(5)),
     '$mod+KeyD': bind(() => timelineActions.addDefaultTransition('video')),
     '$mod+Shift+KeyD': bind(() => timelineActions.addDefaultTransition('audio')),
     '$mod+KeyL': bind(() => timelineActions.linkSelection()),

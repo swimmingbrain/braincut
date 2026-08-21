@@ -66,7 +66,8 @@ export function buildCommands(): Command[] {
     c('new-sequence', 'New sequence', 'Project', () => dialog.set({ kind: 'new-sequence' }), 'Ctrl+N'),
     c('sequence-settings', 'Sequence settings', 'Project', () => dialog.set({ kind: 'sequence-settings' })),
     c('export', 'Export', 'Project', () => dialog.set({ kind: 'export' }), 'Ctrl+M'),
-    c('export-frame', 'Export current frame', 'Project', exportCurrentFrame, 'Ctrl+Shift+E'),
+    c('export-frame', 'Export current frame (PNG)', 'Project', () => exportCurrentFrame('png'), 'Ctrl+Shift+E'),
+    c('export-frame-jpeg', 'Export current frame (JPEG)', 'Project', () => exportCurrentFrame('jpeg')),
 
     // playback
     c('play', 'Play / pause', 'Playback', () => program().player.toggle(), 'Space'),
@@ -78,9 +79,10 @@ export function buildCommands(): Command[] {
     c('go-out', 'Go to out point', 'Playback', goToOut, 'Shift+O'),
     c('loop', 'Toggle loop playback', 'Playback', toggleLoop),
     c('follow', 'Toggle follow playhead', 'Playback', toggleFollowPlayhead),
-    c('quality-full', 'Preview quality: full', 'Playback', () => setPreviewQuality(1)),
-    c('quality-half', 'Preview quality: half', 'Playback', () => setPreviewQuality(0.5)),
-    c('quality-quarter', 'Preview quality: quarter', 'Playback', () => setPreviewQuality(0.25)),
+    c('quality-full', 'Preview quality: Full', 'Playback', () => setPreviewQuality(1)),
+    c('quality-half', 'Preview quality: 1/2', 'Playback', () => setPreviewQuality(0.5)),
+    c('quality-quarter', 'Preview quality: 1/4', 'Playback', () => setPreviewQuality(0.25)),
+    c('quality-eighth', 'Preview quality: 1/8', 'Playback', () => setPreviewQuality(0.125)),
 
     // marking
     c('mark-in', 'Mark in', 'Marking', markIn, 'I'),
@@ -100,6 +102,8 @@ export function buildCommands(): Command[] {
     c('ripple-trim-prev', 'Ripple trim previous edit to playhead', 'Edit', () => rippleTrimToPlayhead('previous'), 'Q'),
     c('ripple-trim-next', 'Ripple trim next edit to playhead', 'Edit', () => rippleTrimToPlayhead('next'), 'W'),
     c('close-gap', 'Close gap at playhead', 'Edit', () => timelineActions.closeGapAtPlayhead()),
+    c('nudge-left', 'Nudge selection one frame left', 'Edit', () => timelineActions.nudgeSelection(-1), 'Alt+←'),
+    c('nudge-right', 'Nudge selection one frame right', 'Edit', () => timelineActions.nudgeSelection(1), 'Alt+→'),
     c('video-transition', 'Add default video transition', 'Edit', () => timelineActions.addDefaultTransition('video'), 'Ctrl+D'),
     c('audio-transition', 'Add default audio transition', 'Edit', () => timelineActions.addDefaultTransition('audio'), 'Ctrl+Shift+D'),
     c('link', 'Link / unlink', 'Edit', () => timelineActions.linkSelection(), 'Ctrl+L'),
