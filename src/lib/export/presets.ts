@@ -45,6 +45,9 @@ export interface ExportPreset {
   description: string;
   // the browser has to be able to encode this codec for the preset to show up
   requires?: ExportVideoCodec;
+  // the frame of this preset is the point of it: keep it as it is and let
+  // the export letterbox the sequence into it
+  exactFrame?: boolean;
   settings: Omit<ExportSettings, 'width' | 'height' | 'fps'> & { width: Match; height: Match; fps: Match };
 }
 
@@ -89,6 +92,7 @@ export const presets: ExportPreset[] = [
     id: 'vertical-1080',
     name: 'Vertical 1080x1920',
     description: 'H.264 MP4 for shorts, reels and stories',
+    exactFrame: true,
     settings: { ...base, width: 1080, height: 1920 }
   },
   {
@@ -150,7 +154,12 @@ export function settingsFromPreset(preset: ExportPreset, sequence: Sequence): Ex
   const s = preset.settings;
   let width = s.width === 'match' ? sequence.width : s.width;
   let height = s.height === 'match' ? sequence.height : s.height;
-  if (s.width !== 'match' && s.height !== 'match') {
+  if (s.width !== 'match' && s.height !== 'match' && preset.exactFrame) {
+    // this preset is about the shape, so the frame stays as it is and the
+    // export puts bars around the sequence
+    width = s.width;
+    height = s.height;
+  } else if (s.width !== 'match' && s.height !== 'match') {
     // a fixed size is a box: keep the sequence aspect inside it, and turn
     // the box around for a portrait sequence so the long sides line up
     const portrait = sequence.height > sequence.width;
