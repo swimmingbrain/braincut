@@ -289,6 +289,65 @@ describe('trimming', () => {
     expect(video.duration).toBe(4);
   });
 
+  it('rolls a cut in both directions when both sides have source left', () => {
+    const s = seq();
+    const a = av(s, 0, { in: 2, duration: 4 }).video;
+    const b = av(s, 4, { in: 2, duration: 4 }).video;
+    // rolling left needs the right clip to have source before its in point
+    expect(ops.rollEdit(s, a.id, b.id, 2, { getMedia })).toBe(2);
+    expect(layout(s.tracks[0])).toEqual([[0, 2], [2, 8]]);
+    expect(b.in).toBe(0);
+    expect(a.duration).toBe(2);
+  });
+
+  it('stops a roll where the source of one side runs out', () => {
+    const s = seq();
+    const a = av(s, 0, { in: 0, duration: 4 }).video;
+    const b = av(s, 4, { in: 1, duration: 4 }).video;
+    // the right clip only has one second of head handle
+    expect(ops.rollEdit(s, a.id, b.id, 0, { getMedia })).toBe(3);
+    expect(b.in).toBe(0);
+    expect(layout(s.tracks[0])).toEqual([[0, 3], [3, 8]]);
+  });
+
+  it('trims the linked edges of one edit together and ripples once', () => {
+    const s = seq();
+    const first = av(s, 0, { duration: 4 });
+    const second = av(s, 4, { duration: 4 });
+    ops.trimEdges(
+      s,
+      [
+        { clipId: first.video.id, edge: 'tail' },
+        { clipId: first.audio.id, edge: 'tail' }
+      ],
+      5,
+      { ripple: true, getMedia }
+    );
+    expect(layout(s.tracks[0])).toEqual([[0, 5], [5, 9]]);
+    expect(layout(s.tracks[3])).toEqual([[0, 5], [5, 9]]);
+    expect(second.video.start).toBe(5);
+  });
+
+  it('takes the tightest source limit of the edges it trims together', () => {
+    const s = seq();
+    const { video, audio } = av(s, 0, { duration: 4 });
+    // the audio half comes from a shorter file
+    lib.set('short', media({ id: 'short', duration: 6 }));
+    audio.mediaId = 'short';
+    ops.trimEdges(
+      s,
+      [
+        { clipId: video.id, edge: 'tail' },
+        { clipId: audio.id, edge: 'tail' }
+      ],
+      20,
+      { getMedia }
+    );
+    expect(video.duration).toBe(6);
+    expect(audio.duration).toBe(6);
+    lib.delete('short');
+  });
+
   it('slides between neighbours', () => {
     const s = seq();
     put(s, 0, title(0, 4, 'a'));
@@ -298,6 +357,32 @@ describe('trimming', () => {
     expect(layout(s.tracks[0])).toEqual([[0, 6], [6, 8], [8, 10]]);
     ops.slideClip(s, s.tracks[0].clips[1].id, -20);
     expect(layout(s.tracks[0])).toEqual([[0, F], [F, 2 + F].map(round) as [number, number], [round(2 + F), 10]]);
+  });
+
+  it('never slides a neighbour past the end of its source', () => {
+    const s = seq();
+    const a = av(s, 0, { in: 0, duration: 4 }).video;
+    const b = av(s, 4, { in: 0, duration: 2 }).video;
+    const c = av(s, 6, { in: 0, duration: 10 }).video;
+    // c has nothing before its in point, so b cannot slide left at all
+    ops.slideClip(s, b.id, -2, { getMedia });
+    expect(c.in).toBe(0);
+    expect(layout(s.tracks[0])).toEqual([[0, 4], [4, 6], [6, 16]]);
+    // and a only has ten seconds of source, so sliding right stops there
+    ops.slideClip(s, b.id, 8, { getMedia });
+    expect(a.duration).toBe(10);
+    expect(layout(s.tracks[0])).toEqual([[0, 10], [10, 12], [12, 16]]);
+    expect(c.in).toBe(6);
+  });
+
+  it('slides left into the head handle of the next clip', () => {
+    const s = seq();
+    av(s, 0, { in: 0, duration: 4 });
+    const b = av(s, 4, { in: 0, duration: 2 }).video;
+    const c = av(s, 6, { in: 3, duration: 4 }).video;
+    ops.slideClip(s, b.id, -2, { getMedia });
+    expect(layout(s.tracks[0])).toEqual([[0, 2], [2, 4], [4, 10]]);
+    expect(c.in).toBe(1);
   });
 });
 

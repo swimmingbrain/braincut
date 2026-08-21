@@ -2,7 +2,7 @@
 // steps, row layout, hit zones live here so the components stay thin and
 // the numbers can be tested without a dom. the actions at the bottom are
 // what the shortcuts and the command palette call
-import { get } from 'svelte/store';
+import { get, writable } from 'svelte/store';
 import type { Clip, Id, Sequence, Track, TrackKind } from '$lib/project/types';
 import { activeSequence, clearSelection, editSequence } from '$lib/project/store';
 import * as ops from '$lib/project/ops';
@@ -101,6 +101,25 @@ export function siblingTrack(seq: Sequence, trackId: Id, offset: number): Track 
 
 export function firstUnlockedTrack(seq: Sequence, kind: TrackKind): Track | null {
   return seq.tracks.find((t) => t.kind === kind && !t.locked) ?? null;
+}
+
+// how many tracks a group of clips can travel together before one of them
+// would run past the first or last track of its kind. without this the ones
+// at the edge pile onto the same track and overwrite each other
+export function trackOffsetRange(seq: Sequence, trackIds: Iterable<Id>): { min: number; max: number } {
+  let min = -Infinity;
+  let max = Infinity;
+  for (const trackId of trackIds) {
+    const track = seq.tracks.find((t) => t.id === trackId);
+    if (!track) continue;
+    const count = seq.tracks.filter((t) => t.kind === track.kind).length;
+    const index = kindIndex(seq, trackId);
+    min = Math.max(min, -index);
+    max = Math.min(max, count - 1 - index);
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return { min: 0, max: 0 };
+  // negating a zero index gives -0, which compares equal but reads wrong
+  return { min: min === 0 ? 0 : min, max: max === 0 ? 0 : max };
 }
 
 // candidate tick steps in seconds, frames first. the ruler picks the
@@ -252,13 +271,47 @@ export function zoomOut(viewportWidth: number): void {
   timelineScroll.set(next.scroll);
 }
 
+// the zoom at which the whole sequence just fits the lanes. a little air on
+// the right, and an empty sequence shows ten seconds
+export function fitZoom(duration: number, viewportWidth: number): number {
+  const span = duration > 0 ? duration * 1.04 : 10;
+  return clampZoom(Math.max(1, viewportWidth - 8) / span);
+}
+
 export function zoomToFit(viewportWidth: number): void {
   const seq = get(activeSequence);
-  const duration = seq ? sequenceDuration(seq) : 0;
-  // a little air on the right, and an empty sequence shows ten seconds
-  const span = duration > 0 ? duration * 1.04 : 10;
-  timelineZoom.set(clampZoom(Math.max(1, viewportWidth - 8) / span));
+  timelineZoom.set(fitZoom(seq ? sequenceDuration(seq) : 0, viewportWidth));
   timelineScroll.set(0);
+}
+
+// how wide the lanes are right now. the timeline is the only writer; the
+// status bar reads it to say what the zoom means
+export const timelineViewport = writable(0);
+
+// real material is mastered well below full scale, so peaks drawn as they are
+// leave a flat line in the middle of the lane. every clip is drawn with its
+// own peak as the gain instead. the floor keeps a nearly silent clip looking
+// quiet and true silence flat, the headroom keeps the loudest sample just
+// short of the lane edge
+export const WAVE_FLOOR = 0.06;
+export const WAVE_HEADROOM = 0.92;
+
+// the loudest sample in a stretch of source, out of the min/max pairs the
+// waveform worker leaves behind
+export function peakOfRange(peaks: Float32Array, from: number, to: number, perSecond: number): number {
+  const buckets = peaks.length / 2;
+  const lo = Math.max(0, Math.floor(Math.min(from, to) * perSecond));
+  const hi = Math.min(buckets, Math.ceil(Math.max(from, to) * perSecond));
+  let peak = 0;
+  for (let i = lo; i < hi; i++) {
+    if (-peaks[2 * i] > peak) peak = -peaks[2 * i];
+    if (peaks[2 * i + 1] > peak) peak = peaks[2 * i + 1];
+  }
+  return peak;
+}
+
+export function waveformGain(peak: number): number {
+  return peak > 0 ? WAVE_HEADROOM / Math.max(peak, WAVE_FLOOR) : 0;
 }
 
 function seq(): Sequence | null {
@@ -289,21 +342,36 @@ function defaultTransition(kind: TrackKind): { type: string; duration: number } 
   return { type, duration: Math.max(0.04, prefs.defaultTransitionDuration) };
 }
 
-// transitions on both edges of a clip: joined to the neighbour where there
+export interface EditPoint {
+  trackId: Id;
+  cut: Cut;
+}
+
+// both edges of a clip as edit points: joined to the neighbour where there
 // is one, from or to black otherwise
-export function transitionsAroundClip(s: Sequence, clipId: Id, type: string, duration: number): number {
+export function editPointsOfClip(s: Sequence, clipId: Id): EditPoint[] {
   const found = ops.findClipById(s, clipId);
-  if (!found || found.track.locked) return 0;
+  if (!found || found.track.locked) return [];
   const { clip, track } = found;
   const index = track.clips.indexOf(clip);
   const prev = track.clips[index - 1];
   const next = track.clips[index + 1];
-  let added = 0;
   const head = prev && nearlyEqual(clipEnd(prev), clip.start) ? prev.id : null;
   const tail = next && nearlyEqual(next.start, clipEnd(clip)) ? next.id : null;
-  if (ops.addTransition(s, track.id, { type, leftClipId: head, rightClipId: clip.id, duration })) added++;
-  if (ops.addTransition(s, track.id, { type, leftClipId: clip.id, rightClipId: tail, duration })) added++;
-  return added;
+  return [
+    { trackId: track.id, cut: { cut: clip.start, leftClipId: head, rightClipId: clip.id } },
+    { trackId: track.id, cut: { cut: clipEnd(clip), leftClipId: clip.id, rightClipId: tail } }
+  ];
+}
+
+// the edit point closest to time among a list, so one keypress puts one
+// transition where the playhead is rather than on every edge it can find
+export function nearestEditPoint(points: EditPoint[], time: number): EditPoint | null {
+  let best: EditPoint | null = null;
+  for (const point of points) {
+    if (!best || Math.abs(point.cut.cut - time) < Math.abs(best.cut.cut - time)) best = point;
+  }
+  return best;
 }
 
 export const timelineActions = {
@@ -406,31 +474,31 @@ export const timelineActions = {
     editSequence('nudge clips', (d) => ops.moveClips(d, moves, 'overwrite', { keepLinked: false }));
   },
 
-  // on the edges of the selected clips, or on the cut nearest the playhead
+  // exactly one transition, on the edit point nearest the playhead: among the
+  // edges of the selection when there is one, on any track of that kind
+  // otherwise. two edges at once is what a drag on each of them is for
   addDefaultTransition(kind: TrackKind): void {
     const s = seq();
     if (!s) return;
     const { type, duration } = defaultTransition(kind);
+    const time = get(playhead);
     const ids = selectedIds(s).filter((cid) => ops.trackOf(s, cid)?.kind === kind);
-    let added = 0;
+    const points: EditPoint[] = [];
     if (ids.length) {
-      editSequence('add transitions', (d) => {
-        for (const cid of ids) added += transitionsAroundClip(d, cid, type, duration);
-      });
+      for (const cid of ids) points.push(...editPointsOfClip(s, cid));
     } else {
-      const time = get(playhead);
-      let best: { trackId: Id; cut: Cut } | null = null;
       for (const track of s.tracks) {
         if (track.kind !== kind || track.locked) continue;
         const cut = cutNear(track, time, Infinity);
-        if (cut && (!best || Math.abs(cut.cut - time) < Math.abs(best.cut.cut - time))) best = { trackId: track.id, cut };
+        if (cut) points.push({ trackId: track.id, cut });
       }
-      if (best) {
-        const target = best;
-        editSequence('add transition', (d) => {
-          if (ops.addTransition(d, target.trackId, { type, ...target.cut, duration })) added++;
-        });
-      }
+    }
+    const target = nearestEditPoint(points, time);
+    let added = 0;
+    if (target) {
+      editSequence('add transition', (d) => {
+        if (ops.addTransition(d, target.trackId, { type, ...target.cut, duration })) added++;
+      });
     }
     if (added === 0) addToast('No edit point to put a transition on', 'info');
   },

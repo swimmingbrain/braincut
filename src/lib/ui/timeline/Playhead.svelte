@@ -1,11 +1,12 @@
 <script lang="ts">
-  // the accent line through every lane. the head in the ruler is the only
-  // part that takes the pointer, the line lets clicks fall through
-  let { x, onpointerdown }: { x: number; onpointerdown?: (e: PointerEvent) => void } = $props();
+  // the accent line through every lane. nothing here takes the pointer: the
+  // ruler underneath already scrubs, and a head that swallowed clicks would
+  // eat the second half of every double-click on the spot it just moved to
+  let { x }: { x: number } = $props();
 </script>
 
 <div class="playhead" style="transform: translateX({x}px)">
-  <div class="head" role="presentation" onpointerdown={onpointerdown}></div>
+  <div class="head"></div>
   <div class="line"></div>
 </div>
 
@@ -27,8 +28,6 @@
     left: -6px;
     width: 12px;
     height: var(--ruler-h);
-    pointer-events: auto;
-    cursor: ew-resize;
   }
 
   /* a small pennant at the bottom of the ruler, so the head reads even when a

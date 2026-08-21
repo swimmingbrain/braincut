@@ -76,11 +76,16 @@
   // dragging on the ruler scrubs. a marker under the pointer moves instead
   let scrubbing = false;
   let markerDrag: { id: string; x0: number; time: number; moved: boolean } | null = null;
+  // capturing on the press would retarget the double-click that follows to
+  // the ruler's own capture element, so it waits for real movement
+  let pendingCapture: number | null = null;
+  let downX = 0;
 
   function onpointerdown(e: PointerEvent) {
     if (e.button !== 0 || !el) return;
     e.preventDefault();
-    el.setPointerCapture(e.pointerId);
+    pendingCapture = e.pointerId;
+    downX = e.clientX;
     scrubbing = true;
     onselectmarker(null);
     onseek(frameTime(xToTime(localX(e), zoom, scroll), fps));
@@ -90,12 +95,17 @@
     if (e.button !== 0 || !el) return;
     e.preventDefault();
     e.stopPropagation();
-    el.setPointerCapture(e.pointerId);
+    pendingCapture = e.pointerId;
+    downX = e.clientX;
     markerDrag = { id: marker.id, x0: e.clientX, time: marker.time, moved: false };
     onselectmarker(marker.id);
   }
 
   function onpointermove(e: PointerEvent) {
+    if (pendingCapture !== null && Math.abs(e.clientX - downX) > 2) {
+      el?.setPointerCapture(pendingCapture);
+      pendingCapture = null;
+    }
     if (markerDrag) {
       const dx = e.clientX - markerDrag.x0;
       if (!markerDrag.moved && Math.abs(dx) < 3) return;
@@ -114,6 +124,7 @@
   }
 
   function onpointerup() {
+    pendingCapture = null;
     if (markerDrag) {
       if (markerDrag.moved) commitPreview('move marker');
       else onseek(markerDrag.time);

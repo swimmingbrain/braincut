@@ -61,9 +61,11 @@
     const startY = e.clientY;
     const startHeight = track.height;
     const handle = e.currentTarget as HTMLElement;
-    handle.setPointerCapture(e.pointerId);
     let moved = false;
     const move = (ev: PointerEvent) => {
+      // capturing on the press would swallow the double-click that resets
+      // the height, so it waits until the handle is really being dragged
+      if (!moved && Math.abs(ev.clientY - startY) > 2) handle.setPointerCapture(e.pointerId);
       const height = Math.round(Math.min(MAX_TRACK_H, Math.max(MIN_TRACK_H, startHeight + ev.clientY - startY)));
       if (height === track.height) return;
       moved = true;

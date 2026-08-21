@@ -20,6 +20,10 @@
   import { id as newId } from '$lib/project/ids';
   import { snap, snapPoints, snapRange, type SnapPoint } from '$lib/editor/snapping';
   import { endDrag, readDrag, type DragPayload } from '$lib/editor/drag';
+  import { importFiles } from '$lib/media/import';
+  import { openProjectFromFile } from '$lib/editor/project-actions';
+  import { frameExportItems } from '$lib/editor/export-actions';
+  import { PROJECT_EXTENSION } from '$lib/project/serialize';
   import { hasClipboard } from '$lib/editor/clipboard';
   import { toolById } from '$lib/editor/tools';
   import {
@@ -44,6 +48,8 @@
     snapTolerance,
     timeToX,
     timelineActions,
+    timelineViewport,
+    trackOffsetRange,
     trackRows,
     xToTime,
     yToBandValue,
@@ -53,7 +59,8 @@
     zoomToFit,
     type BandKey,
     type Edge,
-    type EdgeZone
+    type EdgeZone,
+    type TrackRow
   } from '$lib/editor/timeline-interactions';
   import {
     activeTool,
@@ -139,6 +146,10 @@
         primary: Id;
         points: SnapPoint[];
         moves: ops.ClipMove[];
+        // how many tracks the whole group may travel before one of its clips
+        // would run past the first or last track of its kind
+        minOffset: number;
+        maxOffset: number;
         alt: boolean;
         x: number;
         y: number;
@@ -217,8 +228,24 @@
     return [...expanded];
   }
 
+  // the pointer is only captured once it really moves. capturing on the press
+  // would retarget the click and double-click that follow to the body, and
+  // then nothing could tell which clip they landed on
+  let pendingCapture: number | null = null;
+  let downX = 0;
+  let downY = 0;
+
   function capture(e: PointerEvent) {
-    body?.setPointerCapture(e.pointerId);
+    pendingCapture = e.pointerId;
+    downX = e.clientX;
+    downY = e.clientY;
+  }
+
+  function captureIfMoved(e: PointerEvent) {
+    if (pendingCapture === null) return;
+    if (Math.abs(e.clientX - downX) <= 2 && Math.abs(e.clientY - downY) <= 2) return;
+    body?.setPointerCapture(pendingCapture);
+    pendingCapture = null;
   }
 
   function onpointerdown(e: PointerEvent) {
@@ -309,6 +336,9 @@
       const f = ops.findClipById(seq, cid);
       if (f && !f.track.locked) origins.set(cid, { trackId: f.track.id, start: f.clip.start, duration: f.clip.duration, kind: f.track.kind, name: f.clip.name });
     }
+    // clamping the whole group together is what keeps two of its clips from
+    // landing on the same track and overwriting each other at the edge
+    const { min: minOffset, max: maxOffset } = trackOffsetRange(seq, [...origins.values()].map((o) => o.trackId));
     drag = {
       mode: 'move',
       ids: [...origins.keys()],
@@ -316,6 +346,8 @@
       primary: clipId,
       points: pointsFor([...origins.keys()]),
       moves: [],
+      minOffset,
+      maxOffset,
       alt: e.altKey,
       x,
       y,
@@ -424,6 +456,7 @@
 
   function onpointermove(e: PointerEvent) {
     lastEvent = e;
+    if (drag) captureIfMoved(e);
     if (!raf) raf = requestAnimationFrame(frame);
   }
 
@@ -498,7 +531,8 @@
     snapX = sr.point ? timeToX(sr.point.time, zoom, scroll) : null;
     const delta = start - primary.start;
     const row = rowAtY(rows, y);
-    const offset = row && row.track.kind === primary.kind ? kindIndex(seq, row.track.id) - kindIndex(seq, primary.trackId) : 0;
+    const wantedOffset = row && row.track.kind === primary.kind ? kindIndex(seq, row.track.id) - kindIndex(seq, primary.trackId) : 0;
+    const offset = Math.min(d.maxOffset, Math.max(d.minOffset, wantedOffset));
     const moves: ops.ClipMove[] = [];
     const next: Ghost[] = [];
     for (const [cid, origin] of d.origins) {
@@ -528,12 +562,14 @@
     preview((p) => {
       const s = seqIn(p);
       if (!s) return;
+      // the linked edges are trimmed together: one ripple for the whole edit
+      const plain: ops.TrimEdge[] = [];
       for (const edge of edges) {
         const roll = rolls.get(edge.clipId);
         if (roll) ops.rollEdit(s, roll.left, roll.right, target, { getMedia });
-        else if (edge.edge === 'head') ops.trimClipStart(s, edge.clipId, target, { ripple, getMedia });
-        else ops.trimClipEnd(s, edge.clipId, target, { ripple, getMedia });
+        else plain.push({ clipId: edge.clipId, edge: edge.edge });
       }
+      if (plain.length) ops.trimEdges(s, plain, target, { ripple, getMedia });
     });
     const after = ops.findClipById(get(activeSequence)!, edges[0].clipId)?.clip;
     if (!after) return;
@@ -631,6 +667,7 @@
     const d = drag;
     drag = null;
     lastEvent = null;
+    pendingCapture = null;
     if (!d || !seq) {
       clearOverlays();
       return;
@@ -762,14 +799,6 @@
     });
   }
 
-  function onplayheaddown(e: PointerEvent) {
-    if (e.button !== 0 || !body) return;
-    e.preventDefault();
-    e.stopPropagation();
-    drag = { mode: 'scrub' };
-    capture(e);
-  }
-
   function onwheel(e: WheelEvent) {
     if (!body) return;
     // some browsers report lines instead of pixels
@@ -799,6 +828,7 @@
       if (drag) {
         cancelPreview();
         drag = null;
+        pendingCapture = null;
         clearOverlays();
         return;
       }
@@ -922,7 +952,8 @@
           window.dispatchEvent(new CustomEvent('braincut:reveal-media', { detail: { mediaId: clip.mediaId } }));
         }
       },
-      { label: 'Export Frame…', shortcut: 'Ctrl+Shift+E', action: () => window.dispatchEvent(new CustomEvent('braincut:export-frame')) }
+      // both formats: png keeps every pixel, jpeg is a fraction of the size
+      { label: 'Export Frame…', children: frameExportItems() }
     ];
   }
 
@@ -1040,11 +1071,63 @@
     return snapped(xToTime(x, zoom, scroll), pointsFor());
   }
 
+  // a drag from outside the app: files from the desktop or a file manager
+  function hasFiles(e: DragEvent): boolean {
+    return Array.from(e.dataTransfer?.types ?? []).includes('Files');
+  }
+
+  // before the drop the browser only hands out the kinds and mime types of
+  // what is being dragged, never the names or the lengths, so the ghost of a
+  // file drag is one nominal block per file
+  const FILE_GHOST_SECONDS = 4;
+
+  function fileGhosts(row: TrackRow | null, time: number, e: DragEvent): Ghost[] {
+    if (!seq) return [];
+    const types = Array.from(e.dataTransfer?.items ?? []).filter((i) => i.kind === 'file').map((i) => i.type);
+    if (!types.length) types.push('');
+    const out: Ghost[] = [];
+    let cursor = time;
+    types.forEach((type, i) => {
+      const audio = type.startsWith('audio/');
+      const wanted = audio ? 'audio' : 'video';
+      const track = row && row.track.kind === wanted && !row.track.locked ? row.track : firstUnlockedTrack(seq!, wanted);
+      const r = track ? rowOf(rows, track.id) : null;
+      if (!r) return;
+      const label = type.split('/')[0];
+      out.push({
+        id: `file-${i}`,
+        x: timeToX(cursor, zoom, scroll),
+        y: r.top,
+        w: FILE_GHOST_SECONDS * zoom,
+        h: r.height,
+        name: label ? `${label[0].toUpperCase()}${label.slice(1)}` : 'Media',
+        kind: audio ? 'audio' : 'video'
+      });
+      cursor += FILE_GHOST_SECONDS;
+    });
+    return out;
+  }
+
   function ondragover(e: DragEvent) {
+    if (!seq || !body) return;
     const payload = $dragPayload;
-    if (!payload || !seq || !body) return;
+    // every dragover over the timeline is answered, ours or not: the one that
+    // is left alone lets the browser open the dropped file over the editor
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    if (!payload) {
+      dropClipId = null;
+      dropCut = null;
+      snapX = null;
+      if (!hasFiles(e)) {
+        ghosts = [];
+        return;
+      }
+      const { x, y } = local(e);
+      ghosts = fileGhosts(rowAtY(rows, y), dropTime(x), e);
+      insertMode = e.ctrlKey || e.metaKey;
+      return;
+    }
     const { x, y } = local(e);
     const row = rowAtY(rows, y);
     const time = dropTime(x);
@@ -1091,10 +1174,54 @@
     insertMode = false;
   }
 
+  // files dropped on a track are imported and placed where they landed, the
+  // same path a drag from the project panel takes. everything the transfer
+  // holds is read here: the browser empties it as soon as this yields
+  async function dropFiles(e: DragEvent) {
+    const transfer = e.dataTransfer;
+    if (!transfer) return;
+    const project = Array.from(transfer.files ?? []).find((f) => f.name.toLowerCase().endsWith(PROJECT_EXTENSION));
+    if (project) {
+      void openProjectFromFile(project);
+      return;
+    }
+    const { x, y } = local(e);
+    const trackId = rowAtY(rows, y)?.track.id ?? null;
+    const time = dropTime(x);
+    const mode = e.ctrlKey || e.metaKey ? 'insert' : 'overwrite';
+    const items = await importFiles(transfer);
+    const ready = items.filter((m) => m.status === 'ready');
+    if (!ready.length || !seq) return;
+    const plan = planMedia({ kind: 'media', mediaIds: ready.map((m) => m.id) }, trackId ? rowOf(rows, trackId) : null, time);
+    if (!plan.placements.length) {
+      addToast('No unlocked track to put the clip on', 'warning');
+      return;
+    }
+    let placed: Id[] = [];
+    editSequence('add clips', (s) => {
+      placed = ops.placeClips(s, plan.placements, mode);
+    });
+    if (placed.length) selection.set(placed);
+  }
+
   function ondrop(e: DragEvent) {
     const payload = readDrag(e) ?? $dragPayload;
-    if (!payload || !seq) return;
+    // answered whatever it holds, so a stray drop never navigates the tab away
     e.preventDefault();
+    if (!payload || !seq) {
+      // the window level handler imports files dropped anywhere else; over a
+      // track this one places them too, so it keeps the drop to itself
+      if (!payload && seq && hasFiles(e)) {
+        e.stopPropagation();
+        // nothing fires a dragleave after a drop, so anything up the tree that
+        // counts a drag in and out of the window would still think one is on
+        window.dispatchEvent(new DragEvent('dragleave', { dataTransfer: e.dataTransfer }));
+        void dropFiles(e);
+      }
+      clearDrop();
+      endDrag();
+      return;
+    }
     const { x, y } = local(e);
     const row = rowAtY(rows, y);
     const time = dropTime(x);
@@ -1186,14 +1313,15 @@
 
   onMount(() => {
     if (!body || !root) return;
-    const observer = new ResizeObserver(() => {
+    const measure = () => {
       if (!body) return;
       viewW = Math.max(0, body.clientWidth - HEADER_W);
       viewH = body.clientHeight;
-    });
+      timelineViewport.set(viewW);
+    };
+    const observer = new ResizeObserver(measure);
     observer.observe(body);
-    viewW = Math.max(0, body.clientWidth - HEADER_W);
-    viewH = body.clientHeight;
+    measure();
     // ctrl+wheel must stop the browser zoom, which needs a non-passive listener
     root.addEventListener('wheel', onwheel, { passive: false });
     const zoomInHandler = () => zoomIn(viewW);
@@ -1204,6 +1332,7 @@
     window.addEventListener('braincut:zoom-fit', zoomFitHandler);
     return () => {
       observer.disconnect();
+      timelineViewport.set(0);
       root?.removeEventListener('wheel', onwheel);
       window.removeEventListener('braincut:zoom-in', zoomInHandler);
       window.removeEventListener('braincut:zoom-out', zoomOutHandler);
@@ -1317,7 +1446,7 @@
     </div>
 
     <div class="playhead-layer" class:off={!playheadVisible} style="bottom: {SCROLLBAR_H}px">
-      <Playhead x={HEADER_W + playheadX} onpointerdown={onplayheaddown} />
+      <Playhead x={HEADER_W + playheadX} />
     </div>
 
     {#if tip}
