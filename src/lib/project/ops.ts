@@ -348,6 +348,9 @@ export function moveClips(seq: Sequence, moves: ClipMove[], mode: 'overwrite' | 
 
 export interface TrimOptions extends MediaOptions {
   ripple?: boolean;
+  // the clip on the other side of the edit moves along (a roll), so it must
+  // not bound this side
+  ignoreNeighbours?: boolean;
 }
 
 function neighbours(track: Track, clip: Clip): { prev: Clip | null; next: Clip | null } {
@@ -355,34 +358,33 @@ function neighbours(track: Track, clip: Clip): { prev: Clip | null; next: Clip |
   return { prev: track.clips[index - 1] ?? null, next: track.clips[index + 1] ?? null };
 }
 
+// how far the head of a clip can go on source alone: where the file starts,
+// or where it ends for a clip that plays backwards
+function headSourceLimit(clip: Clip, media: MediaItem | undefined): number {
+  if (!media || !mediaBound(clip, media)) return -Infinity;
+  return clip.reverse ? clipEnd(clip) - (media.duration - clip.in) / clip.speed : clip.start - clip.in / clip.speed;
+}
+
+function tailSourceLimit(clip: Clip, media: MediaItem | undefined): number {
+  if (!media || !mediaBound(clip, media)) return Infinity;
+  return clip.reverse ? clip.start + (clip.in + sourceSpan(clip)) / clip.speed : clip.start + (media.duration - clip.in) / clip.speed;
+}
+
 // the earliest start a head trim can reach: previous clip, source start,
 // sequence start, and at least a frame of clip left
 function headLimits(seq: Sequence, track: Track, clip: Clip, opts: TrimOptions): { min: number; max: number } {
   const { prev } = neighbours(track, clip);
-  let min = prev ? clipEnd(prev) : 0;
-  const media = mediaFor(clip, opts);
-  if (media && mediaBound(clip, media)) {
-    if (clip.reverse) {
-      // the head holds the end of the source range
-      min = Math.max(min, clipEnd(clip) - (media.duration - clip.in) / clip.speed);
-    } else {
-      min = Math.max(min, clip.start - clip.in / clip.speed);
-    }
-  }
+  // a ripple trim leaves the clip where it is and pushes what follows, so the
+  // clip before it is no limit either
+  let min = prev && !opts.ripple && !opts.ignoreNeighbours ? clipEnd(prev) : 0;
+  min = Math.max(min, headSourceLimit(clip, mediaFor(clip, opts)));
   return { min: snap(seq, min), max: snap(seq, clipEnd(clip) - minDuration(seq)) };
 }
 
 function tailLimits(seq: Sequence, track: Track, clip: Clip, opts: TrimOptions): { min: number; max: number } {
   const { next } = neighbours(track, clip);
-  let max = next && !opts.ripple ? next.start : Infinity;
-  const media = mediaFor(clip, opts);
-  if (media && mediaBound(clip, media)) {
-    if (clip.reverse) {
-      max = Math.min(max, clip.start + (clip.in + sourceSpan(clip)) / clip.speed);
-    } else {
-      max = Math.min(max, clip.start + (media.duration - clip.in) / clip.speed);
-    }
-  }
+  let max = next && !opts.ripple && !opts.ignoreNeighbours ? next.start : Infinity;
+  max = Math.min(max, tailSourceLimit(clip, mediaFor(clip, opts)));
   return { min: snap(seq, clip.start + minDuration(seq)), max: Number.isFinite(max) ? snap(seq, max) : max };
 }
 
@@ -430,14 +432,66 @@ export function trimClipEnd(seq: Sequence, clipId: Id, newEnd: number, opts: Tri
   return clipEnd(clip);
 }
 
+export interface TrimEdge {
+  clipId: Id;
+  edge: 'head' | 'tail';
+}
+
+// the clips that share one edit point, trimmed as a unit: the tightest source
+// limit wins and, in ripple mode, the gap closes once however many clips sit
+// on the point. trimming a linked pair one clip at a time would push
+// everything after it twice
+export function trimEdges(seq: Sequence, edges: TrimEdge[], target: number, opts: TrimOptions = {}): number | null {
+  const entries: { edge: 'head' | 'tail'; clip: Clip; track: Track }[] = [];
+  for (const e of edges) {
+    const found = findClipById(seq, e.clipId);
+    if (found && !found.track.locked) entries.push({ edge: e.edge, clip: found.clip, track: found.track });
+  }
+  if (entries.length === 0) return null;
+  if (entries.length === 1) {
+    const only = entries[0];
+    return only.edge === 'head'
+      ? trimClipStart(seq, only.clip.id, target, opts)
+      : trimClipEnd(seq, only.clip.id, target, opts);
+  }
+  let t = snap(seq, target);
+  for (const { edge, clip, track } of entries) {
+    const limits = edge === 'head' ? headLimits(seq, track, clip, opts) : tailLimits(seq, track, clip, opts);
+    t = clamp(t, limits.min, limits.max);
+  }
+  const head = entries[0].edge === 'head';
+  const old = head ? entries[0].clip.start : clipEnd(entries[0].clip);
+  const delta = t - old;
+  if (Math.abs(delta) <= TOL) return old;
+  // a head ripple closes the gap behind the longest of the clips
+  const rippleAt = head ? Math.max(...entries.map((e) => clipEnd(e.clip))) : old;
+  const trackIds = new Set(entries.map((e) => e.track.id));
+  const clipIds = new Set(entries.map((e) => e.clip.id));
+  for (const { edge, clip, track } of entries) {
+    if (edge === 'head') {
+      const start = clip.start;
+      trimHead(clip, delta);
+      if (opts.ripple) clip.start = start;
+    } else {
+      trimTail(clip, -delta);
+    }
+    clip.duration = snap(seq, clip.duration);
+    sortTrack(track);
+  }
+  if (opts.ripple) ripple(seq, rippleAt, head ? -delta : delta, { forceTrackIds: trackIds, ignoreIds: clipIds });
+  validateTransitions(seq);
+  return t;
+}
+
 // move the cut between two adjacent clips without changing anything else
 export function rollEdit(seq: Sequence, leftClipId: Id, rightClipId: Id, newCut: number, opts: MediaOptions = {}): number | null {
   const left = findClipById(seq, leftClipId);
   const right = findClipById(seq, rightClipId);
   if (!left || !right || left.track.locked || right.track.locked) return null;
   if (!nearlyEqual(clipEnd(left.clip), right.clip.start)) return null;
-  const leftLimits = tailLimits(seq, left.track, left.clip, { ...opts, ripple: true });
-  const rightLimits = headLimits(seq, right.track, right.clip, opts);
+  // each side is limited by its own source only: the cut they share moves
+  const leftLimits = tailLimits(seq, left.track, left.clip, { ...opts, ignoreNeighbours: true });
+  const rightLimits = headLimits(seq, right.track, right.clip, { ...opts, ignoreNeighbours: true });
   const min = Math.max(leftLimits.min, rightLimits.min);
   const max = Math.min(leftLimits.max, rightLimits.max);
   if (min > max + TOL) return null;
@@ -472,18 +526,14 @@ export function slideClip(seq: Sequence, clipId: Id, delta: number, opts: MediaO
   let d = snap(seq, delta);
   const frame = minDuration(seq);
   if (d < 0) {
+    // the clip before gives up length, the one after has to grow at its head,
+    // so it is that one's source that runs out first
     let min = prev ? (prevAdjacent ? prev.start + frame - clip.start : clipEnd(prev) - clip.start) : -clip.start;
-    if (prev && prevAdjacent) {
-      const limits = tailLimits(seq, track, prev, { ...opts, ripple: true });
-      min = Math.max(min, limits.min - clipEnd(prev));
-    }
+    if (next && nextAdjacent) min = Math.max(min, headSourceLimit(next, mediaFor(next, opts)) - next.start);
     d = Math.max(d, min);
   } else if (d > 0) {
     let max = next ? (nextAdjacent ? clipEnd(next) - frame - clipEnd(clip) : next.start - clipEnd(clip)) : Infinity;
-    if (next && nextAdjacent) {
-      const limits = headLimits(seq, track, next, opts);
-      max = Math.min(max, limits.max - next.start);
-    }
+    if (prev && prevAdjacent) max = Math.min(max, tailSourceLimit(prev, mediaFor(prev, opts)) - clipEnd(prev));
     d = Math.min(d, max);
   }
   d = snap(seq, d);
