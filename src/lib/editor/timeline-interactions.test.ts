@@ -5,13 +5,21 @@ import {
   clampZoom,
   cutNear,
   edgeZone,
+  editPointsOfClip,
+  fitZoom,
   kindIndex,
   linkedEdges,
+  nearestEditPoint,
+  peakOfRange,
   rowAtY,
   rulerScale,
   rulerTicks,
   siblingTrack,
   timeToX,
+  WAVE_FLOOR,
+  WAVE_HEADROOM,
+  waveformGain,
+  trackOffsetRange,
   trackRows,
   xToTime,
   yToBandValue,
@@ -93,6 +101,19 @@ describe('rows', () => {
     expect(siblingTrack(s, v1.id, 5)?.name).toBe('V3');
     expect(siblingTrack(s, v1.id, -3)?.name).toBe('V1');
   });
+
+  it('stops a group of clips before one of them falls off the edge', () => {
+    const s = seq();
+    const [v1, v2, v3] = s.tracks.filter((t) => t.kind === 'video');
+    expect(trackOffsetRange(s, [v1.id])).toEqual({ min: 0, max: 2 });
+    expect(trackOffsetRange(s, [v3.id])).toEqual({ min: -2, max: 0 });
+    // a clip on the bottom track and one above it can only go up
+    expect(trackOffsetRange(s, [v1.id, v2.id])).toEqual({ min: 0, max: 1 });
+    // video and audio halves of a linked pair are counted per kind
+    const a1 = s.tracks.filter((t) => t.kind === 'audio')[0];
+    expect(trackOffsetRange(s, [v1.id, a1.id])).toEqual({ min: 0, max: 2 });
+    expect(trackOffsetRange(s, [])).toEqual({ min: 0, max: 0 });
+  });
 });
 
 describe('hit zones', () => {
@@ -146,5 +167,88 @@ describe('zoom to fit', () => {
     // nine seconds of clips plus a little air fit into 992 px
     expect(get(timelineZoom)).toBeCloseTo(992 / (9 * 1.04));
     project.set(null);
+  });
+
+  it('is the zoom the status bar shows a percentage of', () => {
+    expect(fitZoom(9, 1000)).toBeCloseTo(992 / (9 * 1.04));
+    // an empty sequence shows ten seconds
+    expect(fitZoom(0, 1000)).toBeCloseTo(99.2);
+    // and it stays inside the zoom range whatever it is asked for
+    expect(fitZoom(0.0001, 1000)).toBe(2000);
+    expect(fitZoom(100000, 1000)).toBe(5);
+  });
+});
+
+describe('edit points', () => {
+  it('gives both edges of a clip, joined to the neighbour when there is one', () => {
+    const s = seq();
+    const [a, b, c] = s.tracks[0].clips;
+    expect(editPointsOfClip(s, b.id).map((p) => p.cut)).toEqual([
+      { cut: 2, leftClipId: a.id, rightClipId: b.id },
+      { cut: 5, leftClipId: b.id, rightClipId: null }
+    ]);
+    // nothing touches c on its head, so that edge comes out of black
+    expect(editPointsOfClip(s, c.id)[0].cut).toEqual({ cut: 8, leftClipId: null, rightClipId: c.id });
+    s.tracks[0].locked = true;
+    expect(editPointsOfClip(s, b.id)).toEqual([]);
+  });
+
+  it('picks the one nearest the playhead so a keypress adds a single transition', () => {
+    const s = seq();
+    const b = s.tracks[0].clips[1];
+    const points = editPointsOfClip(s, b.id);
+    expect(nearestEditPoint(points, 2.4)?.cut.cut).toBe(2);
+    expect(nearestEditPoint(points, 4.9)?.cut.cut).toBe(5);
+    expect(nearestEditPoint([], 0)).toBeNull();
+  });
+});
+
+// min/max pairs at 50 buckets a second, all of them at ±level
+function peaks(level: number, seconds: number): Float32Array {
+  const out = new Float32Array(seconds * 50 * 2);
+  for (let i = 0; i < out.length; i += 2) {
+    out[i] = -level;
+    out[i + 1] = level;
+  }
+  return out;
+}
+
+describe('waveform gain', () => {
+  it('finds the loudest sample of a source range', () => {
+    const p = peaks(0.2, 4);
+    p[2 * 120] = -0.8;
+    expect(peakOfRange(p, 0, 4, 50)).toBeCloseTo(0.8, 5);
+    // the spike sits at 2.4 s, so a range that ends before it does not see it
+    expect(peakOfRange(p, 0, 2, 50)).toBeCloseTo(0.2, 5);
+    expect(peakOfRange(p, 2.3, 2.5, 50)).toBeCloseTo(0.8, 5);
+    // a range past the end of the peaks is clamped, not read out of bounds
+    expect(peakOfRange(p, 3.5, 60, 50)).toBeCloseTo(0.2, 5);
+  });
+
+  it('lifts quiet material into the lane without letting a loud one clip', () => {
+    // -18 dBFS, the level real material comes in at
+    const quiet = 10 ** (-18 / 20);
+    expect(quiet * waveformGain(quiet)).toBeCloseTo(WAVE_HEADROOM, 5);
+    // full scale keeps the same headroom, so nothing is ever drawn past the edge
+    expect(1 * waveformGain(1)).toBeCloseTo(WAVE_HEADROOM, 5);
+    for (const peak of [0.001, 0.02, quiet, 0.5, 1]) {
+      expect(peak * waveformGain(peak)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('keeps silence flat and a nearly silent clip quiet', () => {
+    expect(waveformGain(0)).toBe(0);
+    // below the floor the gain stops growing, so a whisper still looks like one
+    const whisper = 0.004;
+    expect(whisper * waveformGain(whisper)).toBeCloseTo((whisper / WAVE_FLOOR) * WAVE_HEADROOM, 5);
+    expect(whisper * waveformGain(whisper)).toBeLessThan(0.1);
+  });
+
+  it('fills the lane at every track height', () => {
+    // what the canvas draws: half the body each way from the middle
+    const drawn = (peak: number, height: number) => Math.round(Math.min(1, peak * waveformGain(peak)) * (height / 2)) * 2;
+    for (const height of [9, 23, 40, 79, 150]) {
+      expect(drawn(10 ** (-18 / 20), height), `height ${height}`).toBeGreaterThanOrEqual(Math.floor(height * 0.9));
+    }
   });
 });
