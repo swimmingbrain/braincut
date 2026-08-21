@@ -30,8 +30,8 @@
   import type { Clip, Track } from '$lib/project/types';
   import { filmstripFrames } from '$lib/media/thumbnails';
   import { computePeaks, DEFAULT_PEAKS_PER_SECOND, getPeaks, peaksVersion } from '$lib/media/waveform';
-  import { sourceTimeAt } from '$lib/engine/clip-time';
-  import { bandKey, bandParam, bandValueToY, timeToX } from '$lib/editor/timeline-interactions';
+  import { clipSourceRange, sourceTimeAt } from '$lib/engine/clip-time';
+  import { bandKey, bandParam, bandValueToY, peakOfRange, timeToX, waveformGain } from '$lib/editor/timeline-interactions';
   import Icon from '$lib/ui/Icon.svelte';
 
   let {
@@ -119,36 +119,48 @@
 
   $effect(() => {
     if (!wantStrip || !strip || !media) return;
-    // read everything that should trigger a redraw, then debounce the decode
-    const deps = [firstSlot, lastSlot, slot, clip.in, clip.speed, clip.reverse, clip.start, bodyH, media.id, zoom];
-    void deps;
+    // everything the decode needs is read here, while the effect is alive:
+    // the awaits below can outlive the clip and a derived read then is stale
     const generation = ++stripGeneration;
     const canvas = strip;
     const m = media;
+    const view = { firstSlot, lastSlot, slot, width: stripWidth, height: bodyH, thumb: thumbW, zoom };
+    const c = clip;
     const timer = setTimeout(async () => {
       const times: number[] = [];
-      for (let i = firstSlot; i < lastSlot; i++) {
-        times.push(sourceTimeAt(clip, clip.start + ((i + 0.5) * slot) / zoom, m.duration));
+      for (let i = view.firstSlot; i < view.lastSlot; i++) {
+        times.push(sourceTimeAt(c, c.start + ((i + 0.5) * view.slot) / view.zoom, m.duration));
       }
       const blob = await blobFor(m);
       if (!blob || generation !== stripGeneration) return;
-      const frames = await filmstripFrames(m, blob, { times, width: thumbW });
+      const frames = await filmstripFrames(m, blob, { times, width: view.thumb });
       if (generation !== stripGeneration) return;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-      canvas.width = stripWidth;
-      canvas.height = bodyH;
-      ctx.clearRect(0, 0, stripWidth, bodyH);
+      canvas.width = view.width;
+      canvas.height = view.height;
+      ctx.clearRect(0, 0, view.width, view.height);
       frames.forEach((frame, i) => {
         if (!frame) return;
-        const dw = (bodyH * frame.width) / frame.height;
-        ctx.drawImage(frame, i * slot, 0, dw, bodyH);
+        const dw = (view.height * frame.width) / frame.height;
+        ctx.drawImage(frame, i * view.slot, 0, dw, view.height);
       });
     }, 120);
     return () => clearTimeout(timer);
   });
 
   const wantWave = $derived(showBody && showWaves && clip.kind === 'audio' && !!media?.hasAudio && !missing && visibleWidth > 0);
+
+  // the gain only changes when the clip's source range or the peaks do, never
+  // while the view scrolls, so a waveform keeps its shape under a scroll
+  const waveGain = $derived.by(() => {
+    void $peaksVersion;
+    if (clip.kind !== 'audio' || !media?.hasAudio) return 0;
+    const peaks = getPeaks(media.id);
+    if (!peaks) return 0;
+    const range = clipSourceRange(clip);
+    return waveformGain(peakOfRange(peaks, range.start, range.end, DEFAULT_PEAKS_PER_SECOND));
+  });
 
   $effect(() => {
     if (!wantWave || !wave || !media) return;
@@ -179,6 +191,11 @@
     const buckets = peaks.length / 2;
     const mid = h / 2;
     const dur = media.duration;
+    const gain = waveGain;
+    // the zero line shows through wherever the clip is silent
+    ctx.globalAlpha = 0.4;
+    ctx.fillRect(0, Math.floor(mid), w, 1);
+    ctx.globalAlpha = 1;
     for (let px = 0; px < w; px++) {
       const a = sourceTimeAt(clip, vs + px / zoom, dur);
       const b = sourceTimeAt(clip, vs + (px + 1) / zoom, dur);
@@ -191,8 +208,8 @@
         if (peaks[2 * i] < mn) mn = peaks[2 * i];
         if (peaks[2 * i + 1] > mx) mx = peaks[2 * i + 1];
       }
-      const top = mid - mx * mid;
-      const bottom = mid - mn * mid;
+      const top = mid - Math.min(1, mx * gain) * mid;
+      const bottom = mid - Math.max(-1, mn * gain) * mid;
       ctx.fillRect(px, top, 1, Math.max(1, bottom - top));
     }
   });
