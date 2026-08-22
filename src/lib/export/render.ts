@@ -1,5 +1,6 @@
 import { AudioBufferSource, BufferTarget, CanvasSource, Output, Quality, StreamTarget, type Target } from 'mediabunny';
 import { renderAudio } from '$lib/engine/audio-render';
+import { ensureRoom, list as opfsList, readBlob, remove as opfsRemove, writeStream } from '$lib/media/opfs';
 import type { Sequence } from '$lib/project/types';
 import { downloadBlob } from './download';
 import { exportGif } from './gif';
@@ -15,9 +16,54 @@ export interface ExportCallbacks {
   signal: AbortSignal;
 }
 
-// a download has to sit in memory as one buffer before the browser gets it,
-// past this size the tab is likely to fall over
+// a download this big is a lot to ask of the browser even when the bytes
+// come off disk, so the user is pointed at saving straight to a file
 const downloadWarnBytes = 1.5e9;
+
+// under this the file is built in memory, which puts the metadata at the
+// front and costs a fraction of a second. a bigger one is written to a
+// scratch file first, so the tab never has to hold the whole export at once
+const streamToDiskBytes = 400e6;
+const scratchPrefix = 'exports/';
+
+// the scratch file has to outlive the export, the browser reads it while it
+// saves the download. the next export is late enough to clear it away
+async function clearScratch(): Promise<void> {
+  const keys = await opfsList().catch(() => [] as string[]);
+  await Promise.all(keys.filter((k) => k.startsWith(scratchPrefix)).map((k) => opfsRemove(k).catch(() => {})));
+}
+
+// a file system writable never reports itself as full, so the muxer would
+// queue the whole export in memory while the disk catches up. one chunk of
+// room is enough to keep the writes flowing and the queue short
+function backpressured(target: WritableStream<FileSystemWriteChunkType>): WritableStream<FileSystemWriteChunkType> {
+  const writer = target.getWriter();
+  return new WritableStream<FileSystemWriteChunkType>(
+    {
+      write: (chunk) => writer.write(chunk),
+      close: () => writer.close(),
+      abort: (reason) => writer.abort(reason)
+    },
+    new CountQueuingStrategy({ highWaterMark: 1 })
+  );
+}
+
+// a clip whose file has gone missing would come out as black picture and
+// silence without a word, so the export stops and names the files instead
+function missingFiles(sequence: Sequence, start: number, end: number, getMedia: GetMedia): string[] {
+  const names = new Set<string>();
+  for (const track of sequence.tracks) {
+    if (track.hidden || track.muted) continue;
+    for (const clip of track.clips) {
+      if (!clip.enabled || !clip.mediaId) continue;
+      if (clip.start >= end || clip.start + clip.duration <= start) continue;
+      const media = getMedia(clip.mediaId);
+      if (!media) names.add(clip.name);
+      else if (media.status === 'missing') names.add(media.name);
+    }
+  }
+  return [...names];
+}
 
 async function writeBlob(blob: Blob, target: ExportTarget): Promise<number> {
   if (target.kind === 'download') {
@@ -50,7 +96,14 @@ export async function exportSequence(
   const duration = end - start;
   if (duration <= 0) throw new Error("There's nothing to export, the sequence is empty.");
 
-  if (target.kind === 'download' && estimateSize(settings, duration, sequence.sampleRate) > downloadWarnBytes) {
+  const missing = missingFiles(sequence, start, end, getMedia);
+  if (missing.length) {
+    const list = missing.slice(0, 3).join(', ') + (missing.length > 3 ? ` and ${missing.length - 3} more` : '');
+    throw new Error(`Some clips point at files that are not there any more: ${list}. Relink them in the project panel, then export again.`);
+  }
+
+  const estimated = estimateSize(settings, duration, sequence.sampleRate);
+  if (target.kind === 'download' && estimated > downloadWarnBytes) {
     callbacks.onNote?.('This file will be large. Saving straight to disk is safer than a download for files over 1.5 GB.');
   }
 
@@ -64,16 +117,24 @@ export async function exportSequence(
   const wantAudio = settings.includeAudio && settings.audioCodec !== null;
   if (!wantVideo && !wantAudio) throw new Error('Nothing to export, both video and audio are switched off.');
 
-  const format = formatFor(settings.container, { fastStart: target.kind === 'handle' ? false : 'in-memory' });
-  let writable: FileSystemWritableFileStream | null = null;
+  const inMemory = target.kind === 'download' && estimated <= streamToDiskBytes;
+  if (target.kind === 'download') await clearScratch();
+  const format = formatFor(settings.container, { fastStart: inMemory ? 'in-memory' : false });
+  let writable: WritableStream<FileSystemWriteChunkType> | null = null;
   let bufferTarget: BufferTarget | null = null;
+  let scratchKey: string | null = null;
   let outputTarget: Target;
   if (target.kind === 'handle') {
     writable = await target.handle.createWritable();
     outputTarget = new StreamTarget(writable, { chunked: true });
-  } else {
+  } else if (inMemory) {
     bufferTarget = new BufferTarget();
     outputTarget = bufferTarget;
+  } else {
+    await ensureRoom(estimated);
+    scratchKey = scratchPrefix + Date.now() + '-' + target.fileName;
+    writable = backpressured(await writeStream(scratchKey));
+    outputTarget = new StreamTarget(writable, { chunked: true });
   }
   const output = new Output({ format, target: outputTarget });
 
@@ -85,7 +146,7 @@ export async function exportSequence(
 
   if (wantVideo && settings.videoCodec) {
     scene = openScene(sequence, settings.width, settings.height, getMedia);
-    videoSource = new CanvasSource(scene.compositor.canvas, {
+    videoSource = new CanvasSource(scene.canvas, {
       codec: settings.videoCodec,
       quality: settings.quality === 'custom' ? new Quality({ bitrate: settings.videoBitrate }) : new Quality(settings.quality),
       keyFrameInterval: settings.keyFrameInterval,
@@ -159,6 +220,7 @@ export async function exportSequence(
 
   const fail = async (error: unknown) => {
     if (writable) await writable.abort().catch(() => {});
+    if (scratchKey) await opfsRemove(scratchKey).catch(() => {});
     await output.cancel().catch(() => {});
     throw signal.aborted ? abortError() : error;
   };
@@ -176,6 +238,14 @@ export async function exportSequence(
   }
 
   if (target.kind === 'handle') return { bytes: (await target.handle.getFile()).size };
+  if (scratchKey) {
+    // the blob url points at the scratch file, so the bytes never come back
+    // through memory on their way to the download
+    const file = await readBlob(scratchKey);
+    if (!file) throw new Error('The export produced no data.');
+    downloadBlob(file, target.fileName);
+    return { bytes: file.size };
+  }
   const buffer = bufferTarget?.buffer;
   if (!buffer) throw new Error('The export produced no data.');
   downloadBlob(new Blob([buffer], { type: mimeTypeFor(settings.container) }), target.fileName);

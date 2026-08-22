@@ -31,12 +31,16 @@ function dither(rgba: Uint8ClampedArray, width: number, height: number, strength
 
 export async function exportGif(sequence: Sequence, settings: ExportSettings, callbacks: GifCallbacks, getMedia: GetMedia): Promise<Blob> {
   const { signal, onProgress } = callbacks;
-  const fps = Math.min(50, Math.max(1, settings.gif.fps));
+  // a gif frame delay is whole hundredths of a second, so the rate is snapped
+  // to one the format can hold and the animation keeps the length it should
+  const wanted = Math.min(50, Math.max(1, settings.gif.fps));
+  const centiseconds = Math.max(2, Math.round(100 / wanted));
+  const fps = 100 / centiseconds;
   const width = roundEven(Math.min(settings.gif.width, sequence.width));
   const height = roundEven((width * sequence.height) / sequence.width);
   const { start, end } = exportRange(sequence, settings.range);
   const frames = Math.max(1, Math.round((end - start) * fps));
-  const delay = Math.round(1000 / fps);
+  const delay = centiseconds * 10;
 
   const scene = openScene(sequence, sequence.width, sequence.height, getMedia);
   const small = document.createElement('canvas');
@@ -48,7 +52,7 @@ export async function exportGif(sequence: Sequence, settings: ExportSettings, ca
   const grab = async (i: number): Promise<Uint8ClampedArray> => {
     throwIfAborted(signal);
     await scene.render(start + i / fps);
-    ctx.drawImage(scene.compositor.canvas, 0, 0, width, height);
+    ctx.drawImage(scene.canvas, 0, 0, width, height);
     return ctx.getImageData(0, 0, width, height).data;
   };
 

@@ -55,6 +55,15 @@ describe('settingsFromPreset', () => {
     expect(s.height).toBe(1920);
   });
 
+  it('gives the vertical preset its own frame whatever the sequence is', () => {
+    const landscape = settingsFromPreset(preset('vertical-1080'), sequence(1920, 1080));
+    expect(landscape.width).toBe(1080);
+    expect(landscape.height).toBe(1920);
+    const portrait = settingsFromPreset(preset('vertical-1080'), sequence(1080, 1920));
+    expect(portrait.width).toBe(1080);
+    expect(portrait.height).toBe(1920);
+  });
+
   it('does not share the gif object between calls', () => {
     const a = settingsFromPreset(preset('gif'), sequence(1920, 1080));
     const b = settingsFromPreset(preset('gif'), sequence(1920, 1080));
