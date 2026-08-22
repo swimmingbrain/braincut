@@ -19,7 +19,7 @@ export async function exportFrame(sequence: Sequence, time: number, options: Fra
     copy.height = sequence.height;
     const ctx = copy.getContext('2d');
     if (!ctx) throw new Error("Couldn't get a drawing context for the frame.");
-    ctx.drawImage(scene.compositor.canvas, 0, 0, sequence.width, sequence.height);
+    ctx.drawImage(scene.canvas, 0, 0, sequence.width, sequence.height);
     const type = options.format === 'jpeg' ? 'image/jpeg' : 'image/png';
     const blob = await new Promise<Blob | null>((resolve) => copy.toBlob(resolve, type, options.quality ?? 0.92));
     if (!blob) throw new Error("The browser couldn't encode the frame.");
