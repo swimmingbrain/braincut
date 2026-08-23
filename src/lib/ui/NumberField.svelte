@@ -41,10 +41,13 @@
   }
 
   function clamp(n: number): number {
-    if (min !== undefined && n < min) n = min;
-    if (max !== undefined && n > max) n = max;
-    // snapping to the step keeps drags from drifting into long decimals
-    const snapped = Math.round(n / step) * step;
+    if (!Number.isFinite(n)) return value;
+    // the step grid starts at the minimum, otherwise a range like 0.1..30 in
+    // steps of 0.5 would snap its own lowest value down to zero
+    const base = min ?? 0;
+    let snapped = step > 0 ? base + Math.round((n - base) / step) * step : n;
+    if (min !== undefined && snapped < min) snapped = min;
+    if (max !== undefined && snapped > max) snapped = max;
     return Number(snapped.toFixed(6));
   }
 
@@ -64,7 +67,11 @@
 
   function commitDraft() {
     editing = false;
-    const parsed = Number(draft.replace(',', '.').replace(/[^0-9.eE+-]/g, ''));
+    const text = draft.replace(',', '.').replace(/[^0-9.eE+-]/g, '').trim();
+    // an empty box or something that isn't a number keeps the old value,
+    // it must never turn into a zero or a NaN behind someone's back
+    if (!text) return;
+    const parsed = Number(text);
     if (Number.isFinite(parsed)) commit(parsed);
   }
 
