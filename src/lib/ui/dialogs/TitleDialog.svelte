@@ -84,6 +84,7 @@
       <SelectField
         value={title.fontFamily}
         options={fontOptions}
+        label="Family"
         onchange={(v) => {
           apply((t) => (t.fontFamily = v));
           if (title) loadFont({ ...title, fontFamily: v });
@@ -96,6 +97,7 @@
         max={1000}
         unit="px"
         precision={0}
+        label="Size"
         onchange={(v) => apply((t) => (t.fontSize = v))}
         oninput={(v) => apply((t) => (t.fontSize = v), true)} />
     </Field>
@@ -103,6 +105,7 @@
       <SelectField
         value={String(title.fontWeight)}
         options={weightOptions}
+        label="Weight"
         onchange={(v) => {
           const weight = Number(v) as TitleData['fontWeight'];
           apply((t) => (t.fontWeight = weight));
@@ -112,6 +115,7 @@
     <Field label="Italic">
       <ToggleField
         value={title.italic}
+        label="Italic"
         onchange={(v) => {
           apply((t) => (t.italic = v));
           if (title) loadFont({ ...title, italic: v });
@@ -120,11 +124,12 @@
     <Field label="Color">
       <ColorField
         value={title.color}
+        label="Text"
         onchange={(v) => apply((t) => (t.color = v))}
         oninput={(v) => apply((t) => (t.color = v), true)} />
     </Field>
     <Field label="Align">
-      <SelectField value={title.align} options={alignOptions} onchange={(v) => apply((t) => (t.align = v as TitleData['align']))} />
+      <SelectField value={title.align} options={alignOptions} label="Align" onchange={(v) => apply((t) => (t.align = v as TitleData['align']))} />
     </Field>
     <Field label="Line height">
       <NumberField
@@ -133,6 +138,7 @@
         max={4}
         step={0.05}
         precision={2}
+        label="Line height"
         onchange={(v) => apply((t) => (t.lineHeight = v))}
         oninput={(v) => apply((t) => (t.lineHeight = v), true)} />
     </Field>
@@ -144,6 +150,7 @@
         step={0.5}
         unit="px"
         precision={1}
+        label="Letter spacing"
         onchange={(v) => apply((t) => (t.letterSpacing = v))}
         oninput={(v) => apply((t) => (t.letterSpacing = v), true)} />
     </Field>
@@ -160,6 +167,7 @@
       <Field label="Color">
         <ColorField
           value={stroke.color}
+          label="Stroke"
           onchange={(v) => apply((t) => t.stroke && (t.stroke.color = v))}
           oninput={(v) => apply((t) => t.stroke && (t.stroke.color = v), true)} />
       </Field>
@@ -171,6 +179,7 @@
           step={0.5}
           unit="px"
           precision={1}
+          label="Stroke width"
           onchange={(v) => apply((t) => t.stroke && (t.stroke.width = v))}
           oninput={(v) => apply((t) => t.stroke && (t.stroke.width = v), true)} />
       </Field>
@@ -188,6 +197,7 @@
       <Field label="Color">
         <ColorField
           value={shadow.color}
+          label="Shadow"
           onchange={(v) => apply((t) => t.shadow && (t.shadow.color = v))}
           oninput={(v) => apply((t) => t.shadow && (t.shadow.color = v), true)} />
       </Field>
@@ -198,6 +208,7 @@
           max={200}
           unit="px"
           precision={0}
+          label="Shadow blur"
           onchange={(v) => apply((t) => t.shadow && (t.shadow.blur = v))}
           oninput={(v) => apply((t) => t.shadow && (t.shadow.blur = v), true)} />
       </Field>
@@ -237,6 +248,7 @@
       <Field label="Color">
         <ColorField
           value={background.color}
+          label="Background"
           onchange={(v) => apply((t) => t.background && (t.background.color = v))}
           oninput={(v) => apply((t) => t.background && (t.background.color = v), true)} />
       </Field>
@@ -247,6 +259,7 @@
           max={500}
           unit="px"
           precision={0}
+          label="Padding"
           onchange={(v) => apply((t) => t.background && (t.background.padding = v))}
           oninput={(v) => apply((t) => t.background && (t.background.padding = v), true)} />
       </Field>
@@ -285,6 +298,7 @@
         step={0.5}
         unit="%"
         precision={1}
+        label="Box width"
         onchange={(v) => apply((t) => (t.box.width = v / 100))}
         oninput={(v) => apply((t) => (t.box.width = v / 100), true)} />
     </Field>

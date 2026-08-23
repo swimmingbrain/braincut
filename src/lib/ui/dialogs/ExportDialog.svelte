@@ -303,32 +303,33 @@
 
       <div class="fields">
         <Field label="Format">
-          <SelectField value={settings.container} options={containerOptions} onchange={(v) => patch((s) => (s.container = v as Container))} />
+          <SelectField value={settings.container} options={containerOptions} label="Format" onchange={(v) => patch((s) => (s.container = v as Container))} />
         </Field>
 
         {#if isGif}
           <Field label="Frame rate">
-            <NumberField value={settings.gif.fps} min={1} max={50} precision={0} unit=" fps" onchange={(v) => patch((s) => (s.gif.fps = v))} />
+            <NumberField value={settings.gif.fps} min={1} max={50} precision={0} unit=" fps" label="Frame rate" onchange={(v) => patch((s) => (s.gif.fps = v))} />
           </Field>
           <Field label="Width">
-            <NumberField value={settings.gif.width} min={16} max={seq.width} step={2} precision={0} unit="px" onchange={(v) => patch((s) => (s.gif.width = roundEven(v)))} />
+            <NumberField value={settings.gif.width} min={16} max={seq.width} step={2} precision={0} unit="px" label="Width" onchange={(v) => patch((s) => (s.gif.width = roundEven(v)))} />
           </Field>
           <Field label="Dither">
-            <ToggleField value={settings.gif.dither} onchange={(v) => patch((s) => (s.gif.dither = v))} />
+            <ToggleField value={settings.gif.dither} label="Dither" onchange={(v) => patch((s) => (s.gif.dither = v))} />
           </Field>
           <Field label="Loop">
-            <ToggleField value={settings.gif.loop} onchange={(v) => patch((s) => (s.gif.loop = v))} />
+            <ToggleField value={settings.gif.loop} label="Loop" onchange={(v) => patch((s) => (s.gif.loop = v))} />
           </Field>
         {:else}
           {#if !isWav}
             <Field label="Video">
-              <ToggleField value={settings.includeVideo} onchange={(v) => patch((s) => (s.includeVideo = v))} />
+              <ToggleField value={settings.includeVideo} label="Video" onchange={(v) => patch((s) => (s.includeVideo = v))} />
             </Field>
             {#if settings.includeVideo}
               <Field label="Video codec">
                 <SelectField
                   value={settings.videoCodec ?? 'avc'}
                   options={videoCodecOptions}
+                  label="Video codec"
                   onchange={(v) => patch((s) => (s.videoCodec = v as ExportVideoCodec))} />
               </Field>
               <Field label="Size">
@@ -349,10 +350,11 @@
                 <SelectField
                   value={String(settings.fps)}
                   options={fpsChoices}
+                  label="Frame rate"
                   onchange={(v) => patch((s) => (s.fps = Number(v)))} />
               </Field>
               <Field label="Quality">
-                <SelectField value={settings.quality} options={qualityOptions} onchange={(v) => patch((s) => (s.quality = v as QualityLevel))} />
+                <SelectField value={settings.quality} options={qualityOptions} label="Quality" onchange={(v) => patch((s) => (s.quality = v as QualityLevel))} />
               </Field>
               {#if settings.quality === 'custom'}
                 <Field label="Video bitrate">
@@ -360,32 +362,35 @@
                     value={settings.videoBitrate / 1e6}
                     min={0.1}
                     max={400}
-                    step={0.5}
+                    step={0.1}
                     precision={1}
                     unit=" Mbps"
+                    label="Video bitrate"
                     onchange={(v) => patch((s) => (s.videoBitrate = Math.round(v * 1e6)))} />
                 </Field>
               {/if}
               <Field label="Key frame every">
-                <NumberField value={settings.keyFrameInterval} min={0.1} max={30} step={0.5} precision={1} unit=" s" onchange={(v) => patch((s) => (s.keyFrameInterval = v))} />
+                <NumberField value={settings.keyFrameInterval} min={0.1} max={30} step={0.1} precision={1} unit=" s" label="Key frame every" onchange={(v) => patch((s) => (s.keyFrameInterval = v))} />
               </Field>
               <Field label="Encoder">
                 <SelectField
                   value={settings.hardwareAcceleration}
                   options={accelOptions}
+                  label="Encoder"
                   onchange={(v) => patch((s) => (s.hardwareAcceleration = v as ExportSettings['hardwareAcceleration']))} />
               </Field>
             {/if}
           {/if}
 
           <Field label="Audio">
-            <ToggleField value={settings.includeAudio} onchange={(v) => patch((s) => (s.includeAudio = v))} />
+            <ToggleField value={settings.includeAudio} label="Audio" onchange={(v) => patch((s) => (s.includeAudio = v))} />
           </Field>
           {#if settings.includeAudio}
             <Field label="Audio codec">
               <SelectField
                 value={settings.audioCodec ?? 'aac'}
                 options={audioCodecOptions}
+                label="Audio codec"
                 onchange={(v) => patch((s) => (s.audioCodec = v as ExportAudioCodec))} />
             </Field>
             {#if settings.audioCodec === 'aac' || settings.audioCodec === 'opus'}
@@ -397,6 +402,7 @@
                   step={16}
                   precision={0}
                   unit=" kbps"
+                  label="Audio bitrate"
                   onchange={(v) => patch((s) => (s.audioBitrate = Math.round(v) * 1000))} />
               </Field>
             {/if}
@@ -406,6 +412,7 @@
         <Field label="Range">
           <SelectField
             value={hasInOut ? settings.range : 'sequence'}
+            label="Range"
             options={[
               { value: 'sequence', label: 'Entire sequence' },
               { value: 'in-out', label: hasInOut ? 'In to out' : 'In to out (no in/out set)' }
