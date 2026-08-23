@@ -241,27 +241,32 @@
     );
     let target = from;
     let frame = 0;
+    let lastY = e.clientY;
+
+    // where the effect would land if the pointer were let go here
+    function indexAt(y: number): number {
+      for (const el of headers) {
+        const rect = el.getBoundingClientRect();
+        if (y < rect.top + rect.height / 2) return Number(el.dataset.effectIndex);
+      }
+      return clip.effects.length;
+    }
     function move(ev: PointerEvent) {
+      lastY = ev.clientY;
       if (frame) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
-        let index = clip.effects.length;
-        for (const el of headers) {
-          const rect = el.getBoundingClientRect();
-          if (ev.clientY < rect.top + rect.height / 2) {
-            index = Number(el.dataset.effectIndex);
-            break;
-          }
-        }
-        target = index;
-        dropIndex = { clipId: clip.id, index };
+        dropIndex = { clipId: clip.id, index: indexAt(lastY) };
       });
     }
-    function up() {
+    function up(ev: PointerEvent) {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       if (frame) cancelAnimationFrame(frame);
       dropIndex = null;
+      // a quick drag can end before the next frame, so the drop is worked
+      // out from the pointer itself and not from what the last frame drew
+      target = indexAt(ev.clientY);
       if (target === from || target === from + 1) return;
       editSequence('reorder effects', (s) =>
         withClip(s, clip.id, (c) => {
@@ -370,6 +375,9 @@
     </div>
     <div class="body" bind:this={body}>
       <Field label="Duration">
+        {#snippet before()}
+          <span class="fold-gap"></span>
+        {/snippet}
         <NumberField
           value={transition.duration}
           min={1 / seq.fps}
@@ -380,6 +388,9 @@
           onchange={(v) => transition && setTransitionDuration(transition, v)} />
       </Field>
       <Field label="Alignment">
+        {#snippet before()}
+          <span class="fold-gap"></span>
+        {/snippet}
         <SelectField
           value={transitionAlignment(transition)}
           options={alignmentOptions}
