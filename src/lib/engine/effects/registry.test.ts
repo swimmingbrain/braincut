@@ -39,10 +39,30 @@ describe('effect registry', () => {
             break;
           case 'point':
             expect(Array.isArray(p.default) && p.default.length === 2, label).toBe(true);
+            expect(p.min, label).toBeTypeOf('number');
+            expect(p.max, label).toBeTypeOf('number');
+            for (const v of p.default as [number, number]) {
+              expect(v, label).toBeGreaterThanOrEqual(p.min as number);
+              expect(v, label).toBeLessThanOrEqual(p.max as number);
+            }
             break;
         }
       }
     }
+  });
+
+  it('bounds every numeric param, points included', () => {
+    const unbounded = effectDefs.flatMap((d) =>
+      d.params
+        .filter((p) => (p.kind === 'number' || p.kind === 'angle' || p.kind === 'point') && (p.min === undefined || p.max === undefined))
+        .map((p) => `${d.type}.${p.key}`)
+    );
+    expect(unbounded).toEqual([]);
+    // motion is the one that ends up off screen when it is not bounded
+    const position = effectDef('transform')?.params.find((p) => p.key === 'position');
+    expect(position?.min).toBeLessThan(-1000);
+    expect(position?.max).toBeGreaterThan(1000);
+    expect(effectDef('transform')?.params.find((p) => p.key === 'anchor')?.max).toBe(position?.max);
   });
 
   it('uses only the documented groups', () => {

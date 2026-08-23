@@ -93,6 +93,8 @@
       step={def.step ?? 1}
       unit={def.unit ?? ''}
       precision={precisionFor(def.step)}
+      min={def.min}
+      max={def.max}
       {disabled}
       label={def.label}
       onchange={(v) => onchange(v)}

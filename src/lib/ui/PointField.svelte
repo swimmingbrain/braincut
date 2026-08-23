@@ -8,6 +8,8 @@
     step = 1,
     precision = 1,
     unit = '',
+    min,
+    max,
     disabled = false,
     label
   }: {
@@ -17,6 +19,8 @@
     step?: number;
     precision?: number;
     unit?: string;
+    min?: number;
+    max?: number;
     disabled?: boolean;
     label?: string;
   } = $props();
@@ -28,6 +32,8 @@
     {step}
     {precision}
     {unit}
+    {min}
+    {max}
     {disabled}
     label={label ? label + ' x' : 'x'}
     onchange={(x) => onchange([x, value[1]])}
@@ -37,6 +43,8 @@
     {step}
     {precision}
     {unit}
+    {min}
+    {max}
     {disabled}
     label={label ? label + ' y' : 'y'}
     onchange={(y) => onchange([value[0], y])}
