@@ -62,8 +62,14 @@ function bool(key: string, label: string, def: boolean, animatable = false): Par
 function color(key: string, label: string, def: string, animatable = true): ParamDef {
   return { key, label, kind: 'color', default: def, animatable };
 }
-function point(key: string, label: string, def: [number, number], opt: Opt = {}): ParamDef {
-  return { key, label, kind: 'point', unit: opt.unit ?? 'px', step: opt.step ?? 1, default: def, animatable: opt.animatable ?? true };
+// points are pixels in the sequence frame. without a bound a typed or pasted
+// 1e9 puts the clip somewhere no undo-free edit brings it back from, so every
+// one of them gets a range. FRAME_SPAN is an 8K width: enough to push any
+// clip right off any frame we support and animate it back
+const FRAME_SPAN = 8192;
+
+function point(key: string, label: string, def: [number, number], min = -FRAME_SPAN, max = FRAME_SPAN, opt: Opt = {}): ParamDef {
+  return { key, label, kind: 'point', min, max, unit: opt.unit ?? 'px', step: opt.step ?? 1, default: def, animatable: opt.animatable ?? true };
 }
 function select(key: string, label: string, def: string, options: { value: string; label: string }[]): ParamDef {
   return { key, label, kind: 'select', default: def, options, animatable: false };
@@ -235,7 +241,7 @@ const stylize: EffectDef[] = [
   },
   {
     type: 'rgb-split', name: 'RGB Split', group: 'Stylize', kind: 'video',
-    params: [point('red', 'Red', [-6, 0]), point('green', 'Green', [0, 6]), point('blue', 'Blue', [0, 0])]
+    params: [point('red', 'Red', [-6, 0], -500, 500), point('green', 'Green', [0, 6], -500, 500), point('blue', 'Blue', [0, 0], -500, 500)]
   },
   { type: 'emboss', name: 'Emboss', group: 'Stylize', kind: 'video', params: [num('strength', 'Strength', 5, 0, 20, { step: 0.1 })] },
   {
@@ -267,7 +273,7 @@ const stylize: EffectDef[] = [
   },
   {
     type: 'drop-shadow', name: 'Drop Shadow', group: 'Stylize', kind: 'video',
-    params: [point('offset', 'Offset', [4, 4]), px('blur', 'Blur', 4, 0, 50), color('color', 'Color', '#000000'), pct('opacity', 'Opacity', 60)]
+    params: [point('offset', 'Offset', [4, 4], -500, 500), px('blur', 'Blur', 4, 0, 50), color('color', 'Color', '#000000'), pct('opacity', 'Opacity', 60)]
   },
   {
     type: 'outline', name: 'Outline', group: 'Stylize', kind: 'video',

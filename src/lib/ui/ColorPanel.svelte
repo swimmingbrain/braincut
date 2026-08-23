@@ -72,7 +72,10 @@
     if (!live) commitPreview(`${paramDef(type, key)?.label ?? key}`.toLowerCase());
   }
 
+  // resetting a row that was never touched would only add an empty effect
   function reset(type: string, key: string) {
+    const t = target;
+    if (!t || !t.clip.effects.some((e) => e.type === type)) return;
     const def = paramDef(type, key);
     if (typeof def?.default === 'number') setParam(type, key, def.default, false);
   }
