@@ -48,13 +48,13 @@ async function compute(id: number, blob: Blob, perSecond: number) {
         const frames = sample.numberOfFrames;
         const channels = sample.numberOfChannels;
         const rate = sample.sampleRate;
-        const size = sample.allocationSize({ planeIndex: 0, format: 'f32' });
+        const size = sample.allocationSize({ planeIndex: 0, format: 'f32-planar' });
         if (plane.length * 4 < size) plane = new Float32Array(size / 4);
         if (mono.length < frames) mono = new Float32Array(frames);
         mono.fill(0, 0, frames);
         const scale = 1 / channels;
         for (let c = 0; c < channels; c++) {
-          sample.copyTo(plane, { planeIndex: c, format: 'f32' });
+          sample.copyTo(plane, { planeIndex: c, format: 'f32-planar' });
           for (let i = 0; i < frames; i++) mono[i] += plane[i] * scale;
         }
         const firstFrame = Math.round(sample.timestamp * rate);
