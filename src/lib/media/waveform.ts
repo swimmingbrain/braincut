@@ -8,7 +8,7 @@ import type { WorkerRequest, WorkerResponse } from './workers/waveform.worker';
 
 export const DEFAULT_PEAKS_PER_SECOND = 50;
 
-const store = createStore('braincut-media', 'peaks');
+const store = createStore('braincut-peaks', 'peaks');
 const cache = new Map<string, Float32Array>();
 const inflight = new Map<string, Promise<Float32Array>>();
 

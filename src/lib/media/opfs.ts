@@ -3,7 +3,7 @@ import { createStore, del, get, keys, set } from 'idb-keyval';
 // proxies and converted copies live in the origin private file system.
 // safari has opfs but no createWritable on the main thread, so there the
 // bytes go into indexeddb under the same key instead
-const fallback = createStore('braincut-media', 'files');
+const fallback = createStore('braincut-files', 'files');
 
 export function proxyKey(mediaId: string): string {
   return `proxy/${mediaId}.mp4`;
