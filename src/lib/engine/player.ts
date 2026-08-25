@@ -7,7 +7,7 @@ import { sourceTimeAt } from './clip-time';
 import type { Compositor } from './compositor';
 import type { FrameMode, MediaCache } from './media-cache';
 
-export type PreviewScale = 1 | 0.5 | 0.25;
+export type PreviewScale = 1 | 0.5 | 0.25 | 0.125;
 
 export interface PlayerStats {
   // frames drawn per second, 0 while paused
@@ -62,6 +62,9 @@ export class Player {
   // signed playback rate, 0 while paused
   readonly rate: Readable<number>;
   readonly stats: Readable<PlayerStats>;
+  // set while the picture cannot be drawn at all, so the monitor can offer
+  // a way out instead of showing an unexplained black rectangle
+  readonly problem: Readable<string | null>;
 
   private readonly compositor: Compositor;
   private readonly audio: AudioEngine;
@@ -76,6 +79,7 @@ export class Player {
   private readonly playingStore = writable(false);
   private readonly rateStore = writable(0);
   private readonly statsStore = writable<PlayerStats>({ fps: 0, dropped: 0 });
+  private readonly problemStore = writable<string | null>(null);
 
   // the paused position, the audio clock owns the time while playing
   private position = 0;
@@ -98,6 +102,8 @@ export class Player {
   private statsAt = 0;
   private prefetchAt = 0;
   private warned = false;
+  private failures = 0;
+  private hasProblem = false;
   private destroyed = false;
 
   constructor(opts: PlayerOptions) {
@@ -114,6 +120,7 @@ export class Player {
     this.playing = { subscribe: this.playingStore.subscribe };
     this.rate = { subscribe: this.rateStore.subscribe };
     this.stats = { subscribe: this.statsStore.subscribe };
+    this.problem = { subscribe: this.problemStore.subscribe };
   }
 
   currentTime(): number {
@@ -156,7 +163,10 @@ export class Player {
     if (this.destroyed) return;
     const seq = this.getSequence();
     if (!seq) return;
-    const target = this.clamp(snapToFrame(Number.isFinite(t) ? t : 0, seq.fps), seq);
+    // the playhead may stand past the last clip, the way it does on a desktop
+    // editor: that is where a paste or an insert lands after the end. there is
+    // nothing to draw there, and playback still stops at the sequence end
+    const target = Math.max(0, snapToFrame(Number.isFinite(t) ? t : 0, seq.fps));
     if (this.isPlaying) {
       this.audio.seek(target);
       // whatever frame is up, the one at the new time must be drawn
@@ -218,6 +228,13 @@ export class Player {
     this.isPlaying = false;
   }
 
+  private setProblem(message: string | null): void {
+    const has = message !== null;
+    if (has === this.hasProblem) return;
+    this.hasProblem = has;
+    this.problemStore.set(message);
+  }
+
   private clamp(t: number, seq: Sequence): number {
     return Math.min(Math.max(0, t), sequenceDuration(seq));
   }
@@ -233,9 +250,11 @@ export class Player {
     if (!seq) return;
     const { start, end } = playRange(seq, this.loop);
     let from = this.isPlaying ? this.audio.currentTime() : this.position;
-    // from the end, forward playback starts over; the same backwards
+    // from the end, forward playback starts over; the same backwards. a
+    // playhead parked past the end has nothing to play towards, so backwards
+    // playback picks the last frame there is
     if (rate > 0 && from >= end - EPS) from = start;
-    if (rate < 0 && from <= start + EPS) from = end;
+    if (rate < 0 && (from <= start + EPS || from > end)) from = end;
     this.pendingSeek = null;
     this.audio.start(seq, this.getMedia, this.cache, from, rate);
     this.playingSeq = seq;
@@ -349,11 +368,18 @@ export class Player {
       .then(
         () => {
           this.rendered++;
+          this.failures = 0;
+          // a lost context resolves without drawing anything, which looks
+          // exactly like the blank monitor nobody could get back
+          this.setProblem(this.compositor.contextLost ? 'the preview lost its graphics context' : null);
         },
         (e: unknown) => {
-          if (this.warned) return;
-          this.warned = true;
-          console.warn('[braincut] render failed:', e);
+          this.failures++;
+          if (!this.warned) {
+            this.warned = true;
+            console.warn('[braincut] render failed:', e);
+          }
+          if (this.failures >= 2) this.setProblem(e instanceof Error ? e.message : String(e));
         }
       )
       .finally(() => {
