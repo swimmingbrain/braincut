@@ -3,6 +3,7 @@
   import { renderStatus, playhead, snapEnabled, timelineZoom } from '$lib/stores/app';
   import { formatTimecode } from '$lib/project/time';
   import { sequenceDuration } from '$lib/project/defaults';
+  import { fitZoom, timelineViewport } from '$lib/editor/timeline-interactions';
 
   const statusColors: Record<string, string> = {
     idle: 'var(--text-muted)',
@@ -25,7 +26,11 @@
   const clipCount = $derived(
     $activeSequence ? $activeSequence.tracks.reduce((sum, track) => sum + track.clips.length, 0) : 0
   );
-  const zoomPercent = $derived(Math.round($timelineZoom));
+  // the zoom store is pixels per second, which is not a percentage of
+  // anything. 100 % is the zoom that fits the whole sequence in the lanes
+  const pxPerSecond = $derived(Math.round($timelineZoom * 10) / 10);
+  const fit = $derived($timelineViewport > 0 ? fitZoom(duration, $timelineViewport) : 0);
+  const zoomPercent = $derived(fit > 0 ? Math.round(($timelineZoom / fit) * 100) : null);
 </script>
 
 <div class="status-bar">
@@ -62,7 +67,9 @@
         snap {$snapEnabled ? 'on' : 'off'}
       </button>
       <span class="sep"></span>
-      <span class="status-item">{zoomPercent}%</span>
+      <span class="status-item zoom" title="{pxPerSecond} px per second of timeline{zoomPercent === null ? '' : ', 100% fits the sequence'}">
+        {zoomPercent === null ? `${pxPerSecond} px/s` : `${zoomPercent}%`}
+      </span>
       <span class="sep"></span>
     {/if}
     <span class="status-item credit">
