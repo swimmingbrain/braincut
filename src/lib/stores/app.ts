@@ -92,7 +92,7 @@ export const renderStatus = writable<RenderStatus>('idle');
 export const importProgress = writable<{ done: number; total: number; name: string } | null>(null);
 
 // preview resolution factor, dropped while scrubbing big sequences
-export const previewQuality = writable<1 | 0.5 | 0.25>(0.5);
+export const previewQuality = writable<1 | 0.5 | 0.25 | 0.125>(0.25);
 export const showSafeMargins = writable(false);
 
 export const dragPayload = writable<DragPayload | null>(null);

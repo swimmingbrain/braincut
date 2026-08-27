@@ -5,7 +5,9 @@ import { dragPayload } from '$lib/stores/app';
 // so they are not in here
 export type DragPayload =
   | { kind: 'media'; mediaIds: string[] }
-  | { kind: 'source'; mediaId: string; in: number; out: number }
+  // only: drag just one half of a clip with sound, like the film and speaker
+  // handles under a desktop source monitor
+  | { kind: 'source'; mediaId: string; in: number; out: number; only?: 'video' | 'audio' }
   | { kind: 'effect'; type: string }
   | { kind: 'transition'; type: string };
 

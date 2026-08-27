@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { source, type Session } from '$lib/engine/session';
+  import { sessionEpoch, source, type Session } from '$lib/engine/session';
   import { endDrag, startDrag } from '$lib/editor/drag';
   import { insertSource, overwriteSource, sourceRange } from '$lib/editor/source-actions';
   import { activeSequence, mediaById } from '$lib/project/store';
@@ -14,7 +14,10 @@
   let session = $state<Session | null>(null);
 
   onMount(() => {
-    session = source();
+    // a preview reset replaces the session, this picks up the new one
+    return sessionEpoch.subscribe(() => {
+      session = source();
+    });
   });
 
   const media = $derived($sourceMedia ? $mediaById.get($sourceMedia.mediaId) ?? null : null);

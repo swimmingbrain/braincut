@@ -1,6 +1,6 @@
 <script lang="ts">
   import { commandPaletteOpen } from '$lib/stores/app';
-  import { onMount } from 'svelte';
+  import { tick } from 'svelte';
 
   interface Command {
     id: string;
@@ -15,6 +15,16 @@
   let query = '';
   let selectedIndex = 0;
   let inputEl: HTMLInputElement;
+  let resultsEl: HTMLDivElement;
+
+  // the palette is only in the dom while it is open, so the field has to be
+  // given the keyboard every time it appears, not once on mount
+  $: if ($commandPaletteOpen) void focusInput();
+
+  async function focusInput() {
+    await tick();
+    inputEl?.focus();
+  }
 
   $: filtered = commands.filter((cmd) => {
     if (!query) return true;
@@ -38,6 +48,13 @@
     cmd.action();
   }
 
+  // arrowing past the bottom of the list has to bring the row into view,
+  // otherwise the selection walks off screen
+  function move(step: number) {
+    selectedIndex = (selectedIndex + step + filtered.length) % filtered.length;
+    resultsEl?.children[selectedIndex]?.scrollIntoView({ block: 'nearest' });
+  }
+
   function handleKeydown(e: KeyboardEvent) {
     // the input and the backdrop share this handler, the key must not reach
     // both or enter runs one command from the filtered list and another from
@@ -48,10 +65,10 @@
       close();
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      selectedIndex = (selectedIndex + 1) % filtered.length;
+      if (filtered.length) move(1);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      selectedIndex = (selectedIndex - 1 + filtered.length) % filtered.length;
+      if (filtered.length) move(-1);
     } else if (e.key === 'Enter') {
       e.preventDefault();
       if (filtered[selectedIndex]) {
@@ -63,10 +80,6 @@
   function handleBackdropClick() {
     close();
   }
-
-  onMount(() => {
-    inputEl?.focus();
-  });
 </script>
 
 {#if $commandPaletteOpen}
@@ -89,7 +102,7 @@
         />
       </div>
 
-      <div class="results">
+      <div class="results" bind:this={resultsEl}>
         {#if filtered.length === 0}
           <div class="no-results">No matching commands</div>
         {:else}
