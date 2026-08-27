@@ -17,7 +17,8 @@
     { name: 'idb-keyval', what: 'projects saved in the browser', url: 'https://github.com/jakearchibald/idb-keyval' },
     { name: 'gifenc', what: 'GIF export', url: 'https://github.com/mattdesl/gifenc' },
     { name: 'tinykeys', what: 'keyboard shortcuts', url: 'https://github.com/jamiebuilds/tinykeys' },
-    { name: 'bezier-easing', what: 'keyframe curves', url: 'https://github.com/gre/bezier-easing' }
+    { name: 'bezier-easing', what: 'keyframe curves', url: 'https://github.com/gre/bezier-easing' },
+    { name: 'Tailwind CSS', what: 'the reset under the theme', url: 'https://tailwindcss.com' }
   ];
 </script>
 
@@ -122,11 +123,13 @@
     padding-bottom: 4px;
   }
 
+  /* one per line: two columns in a 420px dialog cut every second name in
+     half and ellipsised the line next to it */
   .libs {
     list-style: none;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-    gap: 3px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
     font-size: 11.5px;
   }
 
@@ -134,6 +137,10 @@
     display: flex;
     gap: 6px;
     min-width: 0;
+  }
+
+  .libs li a {
+    white-space: nowrap;
   }
 
   .what {
