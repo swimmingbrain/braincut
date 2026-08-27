@@ -19,8 +19,7 @@
         { keys: ['←', '→'], what: 'One frame back / forward' },
         { keys: ['Shift', '←/→'], what: 'Five frames' },
         { keys: ['Home', 'End'], what: 'Start / end of the sequence' },
-        { keys: ['↑', '↓'], what: 'Previous / next edit' },
-        { keys: ['Shift', 'I/O'], what: 'Go to in / out point' }
+        { keys: ['↑', '↓'], what: 'Previous / next edit' }
       ]
     },
     {
@@ -28,6 +27,7 @@
       items: [
         { keys: ['I'], what: 'Mark in' },
         { keys: ['O'], what: 'Mark out' },
+        { keys: ['Shift', 'I/O'], what: 'Go to in / out point' },
         { keys: ['Ctrl', 'Shift', 'X'], what: 'Clear in and out' },
         { keys: ['M'], what: 'Add marker at the playhead' },
         { keys: [';'], what: 'Lift the in/out range' },
@@ -40,8 +40,9 @@
       name: 'Editing',
       items: [
         { keys: ['Ctrl', 'K'], what: 'Split at the playhead' },
-        { keys: ['Delete'], what: 'Delete selection' },
-        { keys: ['Shift', 'Delete'], what: 'Ripple delete' },
+        { keys: ['Ctrl', 'Shift', 'K'], what: 'Split every track at the playhead' },
+        { keys: ['Delete'], what: 'Delete selection (Backspace too)' },
+        { keys: ['Shift', 'Delete'], what: 'Ripple delete (Shift+Backspace too)' },
         { keys: ['Q'], what: 'Ripple trim previous edit to the playhead' },
         { keys: ['W'], what: 'Ripple trim next edit to the playhead' },
         { keys: ['Ctrl', 'D'], what: 'Default video transition' },
@@ -50,6 +51,7 @@
         { keys: ['Shift', 'E'], what: 'Enable / disable clip' },
         { keys: ['Ctrl', 'R'], what: 'Speed and duration' },
         { keys: ['Ctrl', 'Alt', 'M'], what: 'Mute selected clips' },
+        { keys: ['Alt', '←/→'], what: 'Nudge the selected clips a frame (with Shift, five)' },
         { keys: ['Ctrl', 'C/X/V'], what: 'Copy, cut, paste' },
         { keys: ['Ctrl', 'A'], what: 'Select all' },
         { keys: ['Ctrl', 'Shift', 'A'], what: 'Deselect all' },
@@ -83,7 +85,7 @@
         { keys: ['-'], what: 'Zoom out (numpad - too)' },
         { keys: ['\\'], what: 'Fit the whole sequence' },
         { keys: ['Shift', '1…5'], what: 'Focus project, source, program, timeline, effects' },
-        { keys: ['Ctrl', 'Shift', 'P'], what: 'Command palette (Ctrl+K with nothing selected)' },
+        { keys: ['Ctrl', 'Shift', 'P'], what: 'Command palette (Ctrl+K with nothing to cut)' },
         { keys: ['?'], what: 'This list' },
         { keys: ['Escape'], what: 'Cancel / close' }
       ]
@@ -92,6 +94,7 @@
       name: 'Project',
       items: [
         { keys: ['Ctrl', 'S'], what: 'Save' },
+        { keys: ['Ctrl', 'Shift', 'S'], what: 'Save as' },
         { keys: ['Ctrl', 'O'], what: 'Open a project file' },
         { keys: ['Ctrl', 'I'], what: 'Import media' },
         { keys: ['Ctrl', 'N'], what: 'New sequence' },
@@ -103,7 +106,7 @@
   ];
 </script>
 
-<Dialog title="Keyboard shortcuts" description="Every key the editor listens to." width={640} {onclose}>
+<Dialog title="Keyboard shortcuts" description="Every key the editor listens to." width={760} {onclose}>
   <div class="columns">
     {#each groups as group (group.name)}
       <section class="group">
@@ -129,7 +132,7 @@
 <style>
   .columns {
     columns: 2;
-    column-gap: 24px;
+    column-gap: 28px;
   }
 
   .group {
@@ -161,7 +164,7 @@
     display: flex;
     align-items: center;
     gap: 2px;
-    flex: 0 0 118px;
+    flex: 0 0 124px;
     flex-wrap: wrap;
   }
 

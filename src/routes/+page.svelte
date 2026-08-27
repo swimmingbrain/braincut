@@ -140,23 +140,23 @@
         </div>
         <div class="feature">
           <h3>Real-time preview</h3>
-          <p>Scrub, play, step a frame at a time. The program monitor renders the whole stack live: transforms, opacity, blend modes, effects and transitions, at a preview scale you choose.</p>
+          <p>Scrub, play, step a frame at a time. The program monitor renders the whole stack live: transforms, opacity, blend modes, effects and transitions, at full, half, quarter or eighth scale. HDR footage is tone mapped on the way in.</p>
         </div>
         <div class="feature">
           <h3>Transitions and effects</h3>
-          <p>Over a hundred GPU transitions and a full effect library: colour correction, blurs, keying, stylize, distort. Every parameter can be keyframed with real easing.</p>
+          <p>Sixty-seven GPU transitions and fifty-four effects: forty-four for picture &mdash; colour correction, blurs, keying, stylize, distort &mdash; and ten for audio. Nearly every parameter can be keyframed, held or eased.</p>
         </div>
         <div class="feature">
           <h3>Export to MP4, WebM, GIF</h3>
-          <p>Hardware encoding through WebCodecs, muxed in the browser and streamed straight to disk, so a long export never has to fit in memory. Still frames and GIFs too.</p>
+          <p>Encoded with WebCodecs and muxed in the browser. Anything over 400 MB is streamed to disk instead of being built in memory, so a long export never has to fit in the tab. MOV, MKV and WAV as well, plus GIFs and single frames.</p>
         </div>
         <div class="feature">
           <h3>Your files stay local</h3>
-          <p>Media is read from your disk through the File System Access API. Nothing is uploaded, nothing is copied to a server, and the project file is yours to keep next to the footage.</p>
+          <p>Media is read from your disk, through the File System Access API where the browser has it. Nothing is uploaded, because there is no server. A project remembers where each file was, so reopening it finds the footage again.</p>
         </div>
         <div class="feature">
           <h3>Works offline</h3>
-          <p>Once the page has loaded it keeps working without a connection. Open a project on a train, cut, export, close the tab. The only thing that ever needs the network is converting an exotic file.</p>
+          <p>Once the page has loaded it keeps working without a connection. Open a project on a train, cut, export, close the tab. The only thing that needs the network after that is converting an exotic file.</p>
         </div>
       </div>
     </div>
@@ -182,9 +182,12 @@
 </div>
 
 <style>
-  /* the page is taller than the viewport once the features are there, and the
-     app shell keeps the document from scrolling by default */
-  :global(html), :global(body) {
+  /* the app shell pins html and body to the viewport and hides the overflow.
+     the public pages are documents, so they hand the scrolling back. the two
+     selectors are deliberately heavier than app.css's plain `html, body`,
+     because which of the two stylesheets loads last is not fixed */
+  :global(html:root), :global(html body) {
+    height: auto;
     overflow: auto;
   }
 
@@ -710,6 +713,15 @@
 
     .footer {
       padding: 16px 20px;
+    }
+  }
+
+  /* the three footer columns stop fitting side by side around here */
+  @media (max-width: 560px) {
+    .footer-inner {
+      flex-direction: column;
+      gap: 10px;
+      text-align: center;
     }
   }
 

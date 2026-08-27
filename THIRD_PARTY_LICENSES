@@ -1,53 +1,88 @@
 brainCUT bundles the following libraries. Each keeps its own license; the texts are in
-node_modules/<package>/LICENSE after an install.
+node_modules/<package>/LICENSE after an install. Versions are the ones this repository is
+pinned to in package.json, verified against the installed packages.
 
-mediabunny — demuxing, muxing and the WebCodecs wrappers
+mediabunny 1.55.3 — demuxing, muxing and the WebCodecs wrappers
 MPL-2.0
 https://github.com/Vanilagy/mediabunny
 
-pixi.js — WebGL compositing
+pixi.js 8.20.1 — WebGL compositing
 MIT
 https://github.com/pixijs/pixijs
 
-pixi-filters — the effect filters built on top of it
+pixi-filters 6.1.5 — the effect filters built on top of it
 MIT
 https://github.com/pixijs/filters
 
-gl-transitions — the GLSL transitions
-MIT
+gl-transitions 1.71.0 — the GLSL transitions
+MIT, with one exception
 https://github.com/gl-transitions/gl-transitions
-Each transition names its own author in the header of its GLSL source, and that credit is
-kept in the shader as it is compiled.
+The package is MIT, but the shaders inside it are not all on the same terms, so it is worth
+being exact. Of the 125 shaders it ships, 123 say MIT in their header. One says BSD 2-Clause
+(StereoViewer) and brainCUT does not ship it. The last one says BSD 3-Clause and brainCUT
+does ship it: InvertedPageCurl.glsl, the transition the editor lists as "Page Curl", is
 
-immer — immutable drafts and the patches the undo stack is built from
+    Copyright (c) 2010 Hewlett-Packard Development Company, L.P. All rights reserved.
+
+adapted by Sergey Kosarevsky. The copyright notice, the conditions under it and the author
+line above it are all part of the shader source, and the shader source is what gets bundled
+and compiled — so the notice travels with the code it covers, which is what BSD 3-Clause
+asks for. Neither Hewlett-Packard nor its contributors endorse brainCUT.
+
+Every other shader the editor compiles is MIT, and each one names its own author in its own
+header. That credit is kept in the source in the same way.
+
+immer 11.1.18 — immutable drafts and the patches the undo stack is built from
 MIT
 https://github.com/immerjs/immer
 
-idb-keyval — the IndexedDB wrapper projects and recents are stored through
+idb-keyval 6.3.0 — the IndexedDB wrapper projects and recents are stored through
 Apache-2.0
 https://github.com/jakearchibald/idb-keyval
 
-tinykeys — the keyboard shortcut bindings
+tinykeys 4.0.0 — the keyboard shortcut bindings
 MIT
 https://github.com/jamiebuilds/tinykeys
 
-bezier-easing — cubic bezier interpolation for keyframes
+bezier-easing 3.0.1 — cubic bezier curves behind the eased keyframes
 MIT
 https://github.com/gre/bezier-easing
 
-gifenc — GIF encoding and palette quantization
+gifenc 1.0.3 — GIF encoding and palette quantization
 MIT
 https://github.com/mattdesl/gifenc
 
-@ffmpeg/ffmpeg and @ffmpeg/util — the loader for the converter
+@ffmpeg/ffmpeg 0.12.15 and @ffmpeg/util 0.12.2 — the loader for the converter
 MIT
 https://github.com/ffmpegwasm/ffmpeg.wasm
+
+Two more are build tools rather than runtime dependencies, but what they produce ends up in
+the deployed site, so they belong here too:
+
+svelte 5 and @sveltejs/kit 2 — the framework, and the runtime it compiles into every
+component. Both float on a caret range, so the installed version is whatever the lockfile
+last resolved
+MIT
+https://github.com/sveltejs/svelte
+
+tailwindcss 4 — the reset the theme is built on, compiled into app.css
+MIT
+https://github.com/tailwindlabs/tailwindcss
 
 Not part of this repository:
 
 @ffmpeg/core — the ffmpeg build itself, WebAssembly
-LGPL-2.1-or-later, GPL for some builds
 https://github.com/ffmpegwasm/ffmpeg.wasm
-The core is not shipped with brainCUT and is not committed here. It is downloaded from a
-CDN at runtime, once, and only when a file uses codecs the browser cannot decode on its
-own. The mirror is a preference and can be emptied, which turns conversion off entirely.
+The core is not shipped with brainCUT, is not committed here, and is not a dependency in
+package.json. It is downloaded from a CDN at runtime, once, and only when a file uses codecs
+the browser cannot decode on its own. The default mirror is the @ffmpeg/core 0.12.10 build on
+jsDelivr; the mirror is a preference and can be emptied, which turns conversion off entirely.
+
+As the ffmpeg.wasm project states it, the core is built from FFmpeg, which is licensed under
+the LGPL or the GPL depending on which components a given build was configured with, and
+ffmpeg.wasm's own wrapper code is MIT. If you redistribute a build of the core yourself, or
+ship brainCUT pointed at one you host, the FFmpeg license terms are yours to satisfy. See the
+ffmpeg.wasm repository and https://ffmpeg.org/legal.html for the current wording.
+
+Fonts are loaded at runtime from Google Fonts and are not redistributed here:
+Instrument Serif, JetBrains Mono and Inter, all under the SIL Open Font License 1.1.

@@ -57,7 +57,12 @@
 </div>
 
 <style>
-  :global(html), :global(body) {
+  /* the app shell pins html and body to the viewport and hides the overflow.
+     the public pages are documents, so they hand the scrolling back. the two
+     selectors are deliberately heavier than app.css's plain `html, body`,
+     because which of the two stylesheets loads last is not fixed */
+  :global(html:root), :global(html body) {
+    height: auto;
     overflow: auto;
   }
 
