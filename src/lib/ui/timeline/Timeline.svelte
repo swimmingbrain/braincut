@@ -92,7 +92,7 @@
   import Playhead from './Playhead.svelte';
   import Scrollbar from './Scrollbar.svelte';
 
-  const SCROLLBAR_H = 10;
+  const SCROLLBAR_H = 16;
   // px a pointer has to travel before a press turns into a drag
   const DRAG_THRESHOLD = 3;
 
@@ -1460,7 +1460,7 @@
     <div class="bottom" style="height: {SCROLLBAR_H}px">
       <div class="corner-bottom"></div>
       <div class="scrollbar-wrap">
-        <Scrollbar {scroll} {zoom} viewWidth={viewW} {duration} onchange={onscrollbar} />
+        <Scrollbar {scroll} {zoom} viewWidth={viewW} {duration} playhead={$playhead} onchange={onscrollbar} />
       </div>
     </div>
 
