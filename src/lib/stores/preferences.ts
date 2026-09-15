@@ -22,6 +22,10 @@ export interface Preferences {
   audioScrubbing: boolean;
   timecodeFormat: 'timecode' | 'frames' | 'seconds';
   thumbnailSize: number;
+  // the tab keeps a socket to a braincut-mcp server on this machine so claude
+  // code can drive the editor; off unless asked for
+  claudeBridge: boolean;
+  claudePort: number;
 }
 
 const defaults: Preferences = {
@@ -39,7 +43,9 @@ const defaults: Preferences = {
   hardwareAcceleration: 'no-preference',
   audioScrubbing: false,
   timecodeFormat: 'timecode',
-  thumbnailSize: 96
+  thumbnailSize: 96,
+  claudeBridge: false,
+  claudePort: 7331
 };
 
 function createPreferencesStore() {
