@@ -1327,9 +1327,27 @@
     const zoomInHandler = () => zoomIn(viewW);
     const zoomOutHandler = () => zoomOut(viewW);
     const zoomFitHandler = () => zoomToFit(viewW);
+    // claude code asks for the clip it just touched to be on screen: scroll the
+    // lanes to it first, since a clip outside the view has no element to reveal
+    const revealHandler = (e: Event) => {
+      const clipId = (e as CustomEvent<{ clipId?: string }>).detail?.clipId;
+      const seq = get(activeSequence);
+      if (!seq || !clipId) return;
+      const found = ops.findClipById(seq, clipId);
+      if (!found) return;
+      const left = get(timelineScroll);
+      const width = viewW > 0 ? viewW / get(timelineZoom) : 0;
+      if (width > 0 && (found.clip.start < left || found.clip.start > left + width)) {
+        timelineScroll.set(Math.max(0, found.clip.start - width * 0.2));
+      }
+      requestAnimationFrame(() => {
+        body?.querySelector<HTMLElement>(`[data-clip="${clipId}"]`)?.scrollIntoView({ block: 'nearest' });
+      });
+    };
     window.addEventListener('braincut:zoom-in', zoomInHandler);
     window.addEventListener('braincut:zoom-out', zoomOutHandler);
     window.addEventListener('braincut:zoom-fit', zoomFitHandler);
+    window.addEventListener('braincut:reveal-clip', revealHandler);
     return () => {
       observer.disconnect();
       timelineViewport.set(0);
@@ -1337,6 +1355,7 @@
       window.removeEventListener('braincut:zoom-in', zoomInHandler);
       window.removeEventListener('braincut:zoom-out', zoomOutHandler);
       window.removeEventListener('braincut:zoom-fit', zoomFitHandler);
+      window.removeEventListener('braincut:reveal-clip', revealHandler);
       if (raf) cancelAnimationFrame(raf);
     };
   });
