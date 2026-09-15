@@ -548,7 +548,8 @@ const handlers: Record<string, Handler> = {
       if (size) title.fontSize = Math.max(1, size);
       const weight = optNum(args.fontWeight, 'fontWeight');
       if (weight !== undefined) {
-        title.fontWeight = ([400, 500, 600, 700] as const).reduce((best, w) => (Math.abs(w - weight) < Math.abs(best - weight) ? w : best));
+        // the title renders at 400, 500, 600 or 700; anything else lands on the nearest, halves go up
+        title.fontWeight = Math.min(700, Math.max(400, Math.round(weight / 100) * 100)) as 400 | 500 | 600 | 700;
       }
       const color = optStr(args.color);
       if (color) title.color = color;
