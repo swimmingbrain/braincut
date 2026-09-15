@@ -54,6 +54,12 @@ There's no magic and no backend.
 
 **Frontend.** [SvelteKit](https://kit.svelte.dev/) with the static adapter. The whole app is pre-built to static HTML/CSS/JS and deployed to GitHub Pages. No SSR, no API routes, no server.
 
+## Driving it from Claude Code
+
+brainCUT can be cut by [Claude Code](https://claude.com/claude-code) while you watch. [braincut-mcp](https://github.com/swimmingbrain/braincut-mcp) is a small MCP server that runs on your machine; the tab connects to it over localhost and Claude gets tools to import media, place and trim clips, add titles, transitions, effects and keyframes, look at a frame, and export.
+
+Register the server with Claude Code, then open [cut.swimmingbrain.dev/editor?claude](https://cut.swimmingbrain.dev/editor?claude). The status bar shows a `Claude` segment: amber while it waits for the server, green once connected, and after that the name of whatever Claude did last. Every tool call is one undo step, so Ctrl+Z walks back through Claude's work like your own. The switch lives under Preferences, Claude Code, and in the command palette; it is off unless you turn it on, and the socket only ever points at `127.0.0.1`.
+
 ## Keyboard shortcuts
 
 `Ctrl` is `Cmd` on a Mac. Text fields keep their own keys, and while a dialog or the command palette is open it owns the keyboard.
