@@ -364,6 +364,19 @@
       It is the only thing the editor ever downloads. Leave it empty to disable converting entirely.
     </p>
 
+    <h3 class="section">Claude Code</h3>
+    <Field label="Connect">
+      <ToggleField value={$preferences.claudeBridge} label="Connect to Claude Code" onchange={(v) => set('claudeBridge', v)} />
+    </Field>
+    <p class="help">
+      Lets Claude Code drive the editor through the braincut-mcp server running on this machine. The tab talks to it over localhost only;
+      the status bar shows what it is doing. Opening the editor with ?claude in the address switches this on too.
+    </p>
+    <Field label="Port">
+      <NumberField value={$preferences.claudePort} min={1024} max={65535} step={1} precision={0} label="Claude Code port" onchange={(v) => set('claudePort', Math.round(v))} />
+    </Field>
+    <p class="help">The port braincut-mcp listens on, 7331 unless it was started with another one.</p>
+
     <h3 class="section">Storage</h3>
     <div class="storage">
       {#if scanning && !groups.length}

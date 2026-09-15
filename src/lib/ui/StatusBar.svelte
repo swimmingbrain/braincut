@@ -4,6 +4,14 @@
   import { formatTimecode } from '$lib/project/time';
   import { sequenceDuration } from '$lib/project/defaults';
   import { fitZoom, timelineViewport } from '$lib/editor/timeline-interactions';
+  import { preferences } from '$lib/stores/preferences';
+  import { claude } from '$lib/agent/state';
+
+  const claudeColors: Record<string, string> = {
+    off: 'var(--text-muted)',
+    connecting: 'var(--warning)',
+    connected: 'var(--success)'
+  };
 
   const statusColors: Record<string, string> = {
     idle: 'var(--text-muted)',
@@ -31,6 +39,15 @@
   const pxPerSecond = $derived(Math.round($timelineZoom * 10) / 10);
   const fit = $derived($timelineViewport > 0 ? fitZoom(duration, $timelineViewport) : 0);
   const zoomPercent = $derived(fit > 0 ? Math.round(($timelineZoom / fit) * 100) : null);
+  // what the claude segment says: the last thing it did while connected,
+  // otherwise where the connection stands
+  const claudeText = $derived(
+    $claude.state === 'connected'
+      ? ($claude.lastAction ?? 'connected')
+      : $claude.state === 'connecting'
+        ? `waiting for braincut-mcp on port ${$claude.port}`
+        : 'off'
+  );
 </script>
 
 <div class="status-bar">
@@ -70,6 +87,21 @@
       <span class="status-item zoom" title="{pxPerSecond} px per second of timeline{zoomPercent === null ? '' : ', 100% fits the sequence'}">
         {zoomPercent === null ? `${pxPerSecond} px/s` : `${zoomPercent}%`}
       </span>
+      <span class="sep"></span>
+    {/if}
+    {#if $preferences.claudeBridge}
+      <button
+        class="status-item toggle claude"
+        class:on={$claude.state === 'connected'}
+        onclick={() => preferences.update((p) => ({ ...p, claudeBridge: false }))}
+        title="Claude Code is {$claude.state}. Click to disconnect">
+        <span
+          class="dot"
+          class:pulse={$claude.state === 'connecting'}
+          style="background: {claudeColors[$claude.state]}"></span>
+        Claude
+        <span class="action">{claudeText}</span>
+      </button>
       <span class="sep"></span>
     {/if}
     <span class="status-item credit">
@@ -134,6 +166,13 @@
 
   .toggle.on {
     color: var(--accent);
+  }
+
+  .claude .action {
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-secondary);
   }
 
   .dot {

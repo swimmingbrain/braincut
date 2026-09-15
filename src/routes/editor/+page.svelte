@@ -27,6 +27,7 @@
   import { destroySessions, program } from '$lib/engine/session';
   import { pickFiles } from '$lib/media/import';
   import { installShortcuts } from '$lib/editor/shortcuts';
+  import { installClaudeBridge } from '$lib/agent/bridge';
   import { buildCommands } from '$lib/editor/commands';
   import { exportCurrentFrame } from '$lib/editor/export-actions';
   import {
@@ -110,6 +111,7 @@
     program();
     const removeShortcuts = installShortcuts();
     const removeLifecycle = installProjectLifecycle();
+    const removeBridge = installClaudeBridge();
     const unsubscribeWorkspace = workspace.subscribe((ws) => {
       const tabs = workspaceTabs[ws];
       if (!tabs) return;
@@ -122,6 +124,7 @@
     return () => {
       window.removeEventListener('braincut:export-frame', onExportFrame);
       unsubscribeWorkspace();
+      removeBridge();
       removeLifecycle();
       removeShortcuts();
       destroySessions();

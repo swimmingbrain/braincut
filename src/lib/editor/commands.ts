@@ -22,6 +22,7 @@ import {
   toggleSnapping
 } from './edit-actions';
 import { tools } from './tools';
+import { connectClaude, disconnectClaude } from '$lib/agent/bridge';
 import { activeTool, dialog, selectedTransitionId, workspace, type Workspace } from '$lib/stores/app';
 
 export interface Command {
@@ -138,7 +139,9 @@ export function buildCommands(): Command[] {
     c('zoom-fit', 'Zoom to fit', 'View', () => zoomEvent('zoom-fit'), '\\'),
     c('shortcuts', 'Keyboard shortcuts', 'View', () => dialog.set({ kind: 'shortcuts' }), '?'),
     c('preferences', 'Preferences', 'View', () => dialog.set({ kind: 'preferences' }), 'Ctrl+,'),
-    c('about', 'About brainCUT', 'View', () => dialog.set({ kind: 'about' }))
+    c('about', 'About brainCUT', 'View', () => dialog.set({ kind: 'about' })),
+    c('claude-connect', 'Connect to Claude Code', 'View', connectClaude),
+    c('claude-disconnect', 'Disconnect Claude Code', 'View', disconnectClaude)
   ];
 
   for (const ws of workspaces) {
