@@ -151,6 +151,15 @@ describe('resolveCodecs', () => {
     expect(notes[0]).toMatch(/WebM can't hold H\.264/);
   });
 
+  it('warns when an mp4 has to carry opus', async () => {
+    const s = settingsFromPreset(preset('match'), sequence(1920, 1080));
+    const { settings, notes } = await resolveCodecs(s, probe(['avc'], ['opus']));
+    expect(settings.container).toBe('mp4');
+    expect(settings.audioCodec).toBe('opus');
+    expect(notes.join(' ')).toMatch(/AAC isn't available in this browser, using Opus instead/);
+    expect(notes.join(' ')).toMatch(/Chrome and Edge can write AAC/);
+  });
+
   it('drops audio when nothing encodes it', async () => {
     const s = settingsFromPreset(preset('match'), sequence(1920, 1080));
     const { settings, notes } = await resolveCodecs(s, probe(['avc'], []));

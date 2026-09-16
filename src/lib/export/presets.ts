@@ -350,6 +350,9 @@ export async function resolveCodecs(
           : `doesn't go into ${containerNames[settings.container]}`;
         notes.push(`${codecNames[wanted]} ${reason}, using ${codecNames[chosen]} instead.`);
       }
+      if (chosen === 'opus' && (settings.container === 'mp4' || settings.container === 'mov')) {
+        notes.push('Opus in an MP4 is unusual, phones and messaging apps expect AAC there. Chrome and Edge can write AAC.');
+      }
       settings.audioCodec = chosen;
     }
   }

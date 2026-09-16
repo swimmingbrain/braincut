@@ -2,6 +2,7 @@ import { AudioBufferSource, BufferTarget, CanvasSource, Output, Quality, StreamT
 import { renderAudio } from '$lib/engine/audio-render';
 import { ensureRoom, list as opfsList, readBlob, remove as opfsRemove, writeStream } from '$lib/media/opfs';
 import type { Sequence } from '$lib/project/types';
+import { rebuildAvcDescription } from './avcc';
 import { downloadBlob } from './download';
 import { exportGif } from './gif';
 import { estimateSize, formatFor, mimeTypeFor, type ExportSettings } from './presets';
@@ -151,7 +152,14 @@ export async function exportSequence(
       quality: settings.quality === 'custom' ? new Quality({ bitrate: settings.videoBitrate }) : new Quality(settings.quality),
       keyFrameInterval: settings.keyFrameInterval,
       hardwareAcceleration: settings.hardwareAcceleration,
-      latencyMode: 'quality'
+      latencyMode: 'quality',
+      // the muxer takes the h.264 record from the first packet, and the one
+      // the browser attaches is not always sound, see avcc.ts
+      onEncodedPacket: (packet, meta) => {
+        const config = meta?.decoderConfig;
+        if (settings.videoCodec !== 'avc' || packet.type !== 'key' || !config?.description) return;
+        config.description = rebuildAvcDescription(config.description, packet.data) ?? config.description;
+      }
     });
     output.addVideoTrack(videoSource, { frameRate: fps });
   }
