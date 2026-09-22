@@ -1,8 +1,24 @@
-<script lang="ts">
-  export let size: number = 24;
+<script context="module" lang="ts">
+  // each copy on a page needs its own mask and clip ids
+  let count = 0;
 </script>
 
-<svg width={size} height={size} viewBox="131.33 32.82 690.58 574.45" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-  <path fill="none" stroke="currentColor" stroke-width="52" stroke-linejoin="round" d="M460,112A100.91,100.91 0 0 1 641.27,170.22A88.39,88.39 0 0 1 764.31,282.8A78.26,78.26 0 0 1 706.82,418.8A92.01,92.01 0 0 1 562.61,515.46A103.84,103.84 0 0 1 367.65,495.91A86.75,86.75 0 0 1 226.17,413.6A68.96,68.96 0 0 1 194.1,287.49A77.58,77.58 0 0 1 267.16,160.66A105.41,105.41 0 0 1 460,112Z"/>
-  <path fill="currentColor" d="M566.87,286.28A39,39 0 0 1 566.87,353.82L428.87,433.5A39,39 0 0 1 370.37,399.72L370.37,240.38A39,39 0 0 1 428.87,206.6Z"/>
+<script lang="ts">
+  export let size: number = 24;
+  const uid = `bc${++count}`;
+</script>
+
+<svg width={size} height={size} viewBox="0 8 64 48" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <mask id="{uid}-h">
+      <rect width="64" height="64" fill="#fff" />
+      <rect x="9" y="19" width="5.4" height="5" rx="1" fill="#000" /><rect x="19.2" y="19" width="5.4" height="5" rx="1" fill="#000" /><rect x="29.4" y="19" width="5.4" height="5" rx="1" fill="#000" /><rect x="39.6" y="19" width="5.4" height="5" rx="1" fill="#000" /><rect x="49.8" y="19" width="5.4" height="5" rx="1" fill="#000" />
+      <rect x="9" y="40" width="5.4" height="5" rx="1" fill="#000" /><rect x="19.2" y="40" width="5.4" height="5" rx="1" fill="#000" /><rect x="29.4" y="40" width="5.4" height="5" rx="1" fill="#000" /><rect x="39.6" y="40" width="5.4" height="5" rx="1" fill="#000" /><rect x="49.8" y="40" width="5.4" height="5" rx="1" fill="#000" />
+    </mask>
+    <g id="{uid}-s"><rect x="4" y="15" width="56" height="34" rx="4" fill="currentColor" mask="url(#{uid}-h)" /></g>
+    <clipPath id="{uid}-l"><polygon points="-20,-20 42.6,-20 21.4,84 -20,84" /></clipPath>
+    <clipPath id="{uid}-r"><polygon points="42.6,-20 84,-20 84,84 21.4,84" /></clipPath>
+  </defs>
+  <g transform="translate(-2.44 -3.05)"><g clip-path="url(#{uid}-l)"><use href="#{uid}-s" /></g></g>
+  <g transform="translate(2.44 3.05)"><g clip-path="url(#{uid}-r)"><use href="#{uid}-s" /></g></g>
 </svg>
